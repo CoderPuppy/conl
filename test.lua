@@ -130,6 +130,8 @@ local lex_rules = lex_make_rules {
 	{n=1, pat='%)', act=lex_token 'close_paren'};
 	{n=1, pat='{', act=lex_token 'open_brace'};
 	{n=1, pat='}', act=lex_token 'close_brace'};
+	{n=1, pat='%[', act=lex_token 'open_bracket'};
+	{n=1, pat='%]', act=lex_token 'close_bracket'};
 	{n=1, pat='[^()%[%]{}%s\'",+%.=]+', ext_pat=true, act=lex_token 'identifier'};
 	{n=1, pat='[^%S\n]+', ext_pat=true, act=lex_token 'linear_ws'};
 	{n=1, pat='\r?\n', act=lex_token 'newline'};
@@ -178,24 +180,32 @@ local function lex_indent_pull(state)
 		lex_pull(state.lex)
 		if token and token.type == 'newline' then
 			local new_indent = ''
+			local eof = not lex_peek(state.lex)
+			local next_token
 			while true do
-				local next_token = lex_peek(state.lex)
+				next_token = lex_peek(state.lex)
 				if not next_token or next_token.type ~= 'linear_ws' then
 					break
 				end
 				lex_pull(state.lex)
 				new_indent = new_indent .. next_token.text
 			end
-			local cur_indent = state.indent[#state.indent]
-			if new_indent == cur_indent then
-			elseif new_indent:sub(1, #cur_indent) == cur_indent then
-				state.indent[#state.indent + 1] = new_indent
-				state.pending = { type = 'indent'; relative = new_indent:sub(#cur_indent + 1); }
-			elseif cur_indent:sub(1, #new_indent) == new_indent then
-				state.indent[#state.indent] = nil
-				state.pending = { type = 'dedent'; relative = cur_indent:sub(#new_indent + 1); }
-			else
-				error(('bad indentation: old = %q, new = %q'):format(cur_indent, new_indent))
+			if next_token and next_token.type ~= 'newline' then
+				local cur_indent = state.indent[#state.indent]
+				if new_indent == cur_indent then
+				elseif new_indent:sub(1, #cur_indent) == cur_indent then
+					state.indent[#state.indent + 1] = new_indent
+					state.pending = { type = 'indent'; relative = new_indent:sub(#cur_indent + 1); }
+				elseif cur_indent:sub(1, #new_indent) == new_indent then
+					if #state.indent == 1 and not eof then
+						-- the `not eof` is to accept a trailing newline (unix style), which would not have any indentation after it
+						error(('dedent below initial level: old = %q, new = %q'):format(cur_indent, new_indent))
+					end
+					state.indent[#state.indent] = nil
+					state.pending = { type = 'dedent'; relative = cur_indent:sub(#new_indent + 1); }
+				else
+					error(('bad indentation: old = %q, new = %q'):format(cur_indent, new_indent))
+				end
 			end
 		end
 	end
@@ -464,8 +474,53 @@ local function parse_postop(prec)
 			fn = head;
 			args = args;
 		} end
+	elseif token.type == 'open_bracket' then
+		lex_indent_pull(lex_indent_state)
+		local args = {n = 0;}
+		while true do
+			while true do
+				local token = lex_indent_peek(lex_indent_state)
+				if token.type == 'newline' then
+					lex_indent_pull(lex_indent_state)
+				elseif token.type == 'linear_ws' then
+					lex_indent_pull(lex_indent_state)
+				elseif token.type == 'indent' then
+					lex_indent_pull(lex_indent_state)
+				elseif token.type == 'close_paren' then
+					goto args_done
+				else
+					break
+				end
+			end
+			args.n = args.n + 1
+			args[args.n] = parse_expr(0)
+			while true do
+				local token = lex_indent_pull(lex_indent_state)
+				if token.type == 'close_bracket' then
+					goto args_done
+				elseif token.type == 'comma' then
+					break
+				else
+					error(('TODO: token.type = %q'):format(token.type))
+				end
+			end
+		end
+		::args_done::
+		return function(head) return {
+			type = 'index';
+			fn = head;
+			args = args;
+		} end
 	elseif token.type == 'plus' then
 		lex_indent_pull(lex_indent_state)
+		while true do
+			local token = lex_indent_peek(lex_indent_state)
+			if token.type == 'linear_ws' then
+				lex_indent_pull(lex_indent_state)
+			else
+				break
+			end
+		end
 		local right = parse_expr(0) -- TODO
 		return function(head) return {
 			type = 'add';
@@ -488,6 +543,22 @@ local function parse_postop(prec)
 			type = 'access';
 			head = head;
 			name = name;
+		} end
+	elseif token.type == 'single_equal' then
+		lex_indent_pull(lex_indent_state)
+		while true do
+			local token = lex_indent_peek(lex_indent_state)
+			if token.type == 'linear_ws' then
+				lex_indent_pull(lex_indent_state)
+			else
+				break
+			end
+		end
+		local val = parse_expr(0) -- TODO
+		return function(head) return {
+			type = 'assign';
+			to = head;
+			val = val;
 		} end
 	elseif token.type == 'newline' then
 		lex_indent_pull(lex_indent_state)

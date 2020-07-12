@@ -1,6 +1,1 @@
-let baz = { (foo, bar) in
-	print('foo')
-	(
-		print('bar')
-	)
-}
+foo[bar] = 'baz'
