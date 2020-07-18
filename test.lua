@@ -358,7 +358,6 @@ local function parse_expr_atom()
 			return args
 		end)
 		if ok then
-			save = lex_indent_save(lex_indent_state)
 		else
 			print(args, debug.traceback())
 			args = nil
@@ -379,16 +378,8 @@ local function parse_expr_atom()
 					break
 				end
 			end
-			local ok, expr = pcall(parse_expr, 0)
-			if ok and expr then
-				body.n = body.n + 1
-				body[body.n] = expr
-				save = lex_indent_save(lex_indent_state)
-			else
-				lex_indent_restore(lex_indent_state, save)
-				print(expr, debug.traceback())
-				break
-			end
+			body.n = body.n + 1
+			body[body.n] = assert(parse_expr(0))
 		end
 		::done::
 		return {
@@ -413,16 +404,8 @@ local function parse_expr_atom()
 					break
 				end
 			end
-			local save = lex_indent_save(lex_indent_state)
-			local ok, expr = pcall(parse_expr, 0)
-			if ok and expr then
-				body.n = body.n + 1
-				body[body.n] = expr
-			else
-				lex_indent_restore(lex_indent_state, save)
-				print(expr, debug.traceback())
-				break
-			end
+			body.n = body.n + 1
+			body[body.n] = assert(parse_expr(0))
 		end
 		::done::
 		return {
