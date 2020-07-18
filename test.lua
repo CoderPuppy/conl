@@ -294,6 +294,28 @@ end
 local h = io.open('test.conl', 'r')
 local lex_state = lex_init(h, lex_rules)
 local lex_indent_state = lex_indent_init(lex_state)
+local function is_ws(token)
+	if not token then
+		return false
+	end
+	return false
+		or token.type == 'linear_ws'
+		or token.type == 'newline'
+		or token.type == 'line_comment'
+		or token.type == 'block_comment'
+		or token.type == 'indent'
+		or token.type == 'dedent'
+end
+local function skip_ws()
+	while true do
+		local token = lex_indent_peek(lex_indent_state)
+		if is_ws(token) then
+			lex_indent_pull(lex_indent_state)
+		else
+			break
+		end
+	end
+end
 local parse_expr
 local function parse_expr_atom()
 	local token = lex_indent_peek(lex_indent_state)
@@ -313,23 +335,15 @@ local function parse_expr_atom()
 					error(('TODO: token.type = %q'):format(token.type))
 				end
 			end
+			skip_ws()
 			while true do
 				local token = lex_indent_pull(lex_indent_state)
 				if token.type == 'identifier' and token.text == '=' then
 					break
-				elseif token.type == 'linear_ws' then
-				else
 					error(('TODO: token.type = %q'):format(token.type))
 				end
 			end
-			while true do
-				local token = lex_indent_peek(lex_indent_state)
-				if token.type == 'linear_ws' then
-					lex_indent_pull(lex_indent_state)
-				else
-					break
-				end
-			end
+			skip_ws()
 			local val = assert(parse_expr(0))
 			return {
 				type = 'let';
@@ -337,34 +351,14 @@ local function parse_expr_atom()
 				val = val;
 			}
 		elseif token.text == 'const' then
-			local name
-			while true do
-				local token = lex_indent_pull(lex_indent_state)
-				if token.type == 'identifier' then
-					name = token.text
-					break
-				elseif token.type == 'linear_ws' then
-				else
-					error(('TODO: token.type = %q'):format(token.type))
-				end
-			end
-			while true do
-				local token = lex_indent_pull(lex_indent_state)
-				if token.type == 'identifier' and token.text == '=' then
-					break
-				elseif token.type == 'linear_ws' then
-				else
-					error(('TODO: token.type = %q'):format(token.type))
-				end
-			end
-			while true do
-				local token = lex_indent_peek(lex_indent_state)
-				if token.type == 'linear_ws' then
-					lex_indent_pull(lex_indent_state)
-				else
-					break
-				end
-			end
+			skip_ws()
+			local token = lex_indent_pull(lex_indent_state)
+			assert(token.type == 'identifier')
+			local name = token.text
+			skip_ws()
+			local token = lex_indent_pull(lex_indent_state)
+			assert(token.type == 'identifier' and token.text == '=')
+			skip_ws()
 			local val = assert(parse_expr(0))
 			return {
 				type = 'const';
@@ -403,40 +397,25 @@ local function parse_expr_atom()
 		}
 	elseif token.type == 'open_brace' then
 		lex_indent_pull(lex_indent_state)
+		skip_ws()
 		local save = lex_indent_save(lex_indent_state)
 		local ok, args = pcall(function()
 			local args = {n = 0;}
+			local token = lex_indent_pull(lex_indent_state)
+			assert(token.type == 'open_paren')
 			while true do
 				local token = lex_indent_pull(lex_indent_state)
-				if token.type == 'newline' then
-				elseif token.type == 'indent' then
-				elseif token.type == 'linear_ws' then
-				elseif token.type == 'open_paren' then
-					break
-				else
-					error(('TODO: token.type = %q'):format(token.type))
-				end
-			end
-			while true do
-				local token = lex_indent_pull(lex_indent_state)
-				if token.type == 'newline' then
-				elseif token.type == 'indent' then
-				elseif token.type == 'linear_ws' then
+				if is_ws(token) then
 				elseif token.type == 'identifier' then
 					args.n = args.n + 1
 					args[args.n] = token.text
-					while true do
-						local token = lex_indent_pull(lex_indent_state)
-						if token.type == 'newline' then
-						elseif token.type == 'indent' then
-						elseif token.type == 'linear_ws' then
-						elseif token.type == 'comma' then
-							break
-						elseif token.type == 'close_paren' then
-							goto args_list_done
-						else
-							error(('TODO: token.type = %q'):format(token.type))
-						end
+					skip_ws()
+					local token = lex_indent_pull(lex_indent_state)
+					if token.type == 'comma' then
+					elseif token.type == 'close_paren' then
+						goto args_list_done
+					else
+						error(('TODO: token.type = %q'):format(token.type))
 					end
 				elseif token.type == 'close_paren' then
 					goto args_list_done
@@ -445,15 +424,9 @@ local function parse_expr_atom()
 				end
 			end
 			::args_list_done::
-			while true do
-				local token = lex_indent_pull(lex_indent_state)
-				if token.type == 'identifier' and token.text == 'in' then
-					break
-				elseif token.type == 'linear_ws' then
-				else
-					error(('TODO: token.type = %q'):format(token.type))
-				end
-			end
+			skip_ws()
+			token = lex_indent_pull(lex_indent_state)
+			assert(token.type == 'identifier' and token.text == 'in')
 			return args
 		end)
 		if ok then
@@ -464,16 +437,11 @@ local function parse_expr_atom()
 		end
 		local body = {n = 0;}
 		while true do
-			while true do
-				local token = lex_indent_peek(lex_indent_state)
-				if token.type == 'newline' or token.type == 'indent' or token.type == 'linear_ws' then
-					lex_indent_pull(lex_indent_state)
-				elseif token.type == 'close_brace' then
-					lex_indent_pull(lex_indent_state)
-					goto done
-				else
-					break
-				end
+			skip_ws()
+			local token = lex_indent_peek(lex_indent_state)
+			if token.type == 'close_brace' then
+				lex_indent_pull(lex_indent_state)
+				goto done
 			end
 			body.n = body.n + 1
 			body[body.n] = assert(parse_expr(0))
@@ -488,18 +456,11 @@ local function parse_expr_atom()
 		lex_indent_pull(lex_indent_state)
 		local body = {n = 0;}
 		while true do
-			while true do
-				local token = lex_indent_peek(lex_indent_state)
-				if token.type == 'newline' then
-					lex_indent_pull(lex_indent_state)
-				elseif token.type == 'indent' then
-					lex_indent_pull(lex_indent_state)
-				elseif token.type == 'close_paren' then
-					lex_indent_pull(lex_indent_state)
-					goto done
-				else
-					break
-				end
+			skip_ws()
+			local token = lex_indent_peek(lex_indent_state)
+			if token.type == 'close_paren' then
+				lex_indent_pull(lex_indent_state)
+				goto done
 			end
 			body.n = body.n + 1
 			body[body.n] = assert(parse_expr(0))
@@ -522,31 +483,21 @@ local function parse_postop(prec)
 		lex_indent_pull(lex_indent_state)
 		local args = {n = 0;}
 		while true do
-			while true do
-				local token = lex_indent_peek(lex_indent_state)
-				if token.type == 'newline' then
-					lex_indent_pull(lex_indent_state)
-				elseif token.type == 'linear_ws' then
-					lex_indent_pull(lex_indent_state)
-				elseif token.type == 'indent' then
-					lex_indent_pull(lex_indent_state)
-				elseif token.type == 'close_paren' then
-					goto args_done
-				else
-					break
-				end
+			skip_ws()
+			local token = lex_indent_peek(lex_indent_state)
+			if token.type == 'close_paren' then
+				lex_indent_pull(lex_indent_state)
+				goto args_done
 			end
 			args.n = args.n + 1
 			args[args.n] = assert(parse_expr(0))
-			while true do
-				local token = lex_indent_pull(lex_indent_state)
-				if token.type == 'close_paren' then
-					goto args_done
-				elseif token.type == 'comma' then
-					break
-				else
-					error(('TODO: token.type = %q'):format(token.type))
-				end
+			token = lex_indent_pull(lex_indent_state)
+			if token.type == 'close_paren' then
+				goto args_done
+			elseif token.type == 'comma' then
+				break
+			else
+				error(('TODO: token.type = %q'):format(token.type))
 			end
 		end
 		::args_done::
@@ -559,31 +510,20 @@ local function parse_postop(prec)
 		lex_indent_pull(lex_indent_state)
 		local args = {n = 0;}
 		while true do
-			while true do
-				local token = lex_indent_peek(lex_indent_state)
-				if token.type == 'newline' then
-					lex_indent_pull(lex_indent_state)
-				elseif token.type == 'linear_ws' then
-					lex_indent_pull(lex_indent_state)
-				elseif token.type == 'indent' then
-					lex_indent_pull(lex_indent_state)
-				elseif token.type == 'close_paren' then
-					goto args_done
-				else
-					break
-				end
+			skip_ws()
+			local token = lex_indent_peek(lex_indent_state)
+			if token.type == 'close_paren' then
+				lex_indent_pull(lex_indent_state)
+				goto args_done
 			end
 			args.n = args.n + 1
 			args[args.n] = assert(parse_expr(0))
-			while true do
-				local token = lex_indent_pull(lex_indent_state)
-				if token.type == 'close_bracket' then
-					goto args_done
-				elseif token.type == 'comma' then
-					break
-				else
-					error(('TODO: token.type = %q'):format(token.type))
-				end
+			token = lex_indent_pull(lex_indent_state)
+			if token.type == 'close_bracket' then
+				goto args_done
+			elseif token.type == 'comma' then
+			else
+				error(('TODO: token.type = %q'):format(token.type))
 			end
 		end
 		::args_done::
@@ -595,14 +535,7 @@ local function parse_postop(prec)
 	elseif token.type == 'identifier' then
 		if token.text == '+' then
 			lex_indent_pull(lex_indent_state)
-			while true do
-				local token = lex_indent_peek(lex_indent_state)
-				if token.type == 'linear_ws' then
-					lex_indent_pull(lex_indent_state)
-				else
-					break
-				end
-			end
+			skip_ws()
 			local right = assert(parse_expr(0))
 			return function(head) return {
 				type = 'add';
@@ -611,14 +544,7 @@ local function parse_postop(prec)
 			} end
 		elseif token.text == '=' then
 			lex_indent_pull(lex_indent_state)
-			while true do
-				local token = lex_indent_peek(lex_indent_state)
-				if token.type == 'linear_ws' then
-					lex_indent_pull(lex_indent_state)
-				else
-					break
-				end
-			end
+			skip_ws()
 			local val = assert(parse_expr(0))
 			return function(head) return {
 				type = 'assign';
@@ -645,15 +571,6 @@ local function parse_postop(prec)
 			head = head;
 			name = name;
 		} end
-	elseif token.type == 'newline' then
-		lex_indent_pull(lex_indent_state)
-		return parse_postop(prec)
-	elseif token.type == 'dedent' then
-		lex_indent_pull(lex_indent_state)
-		return parse_postop(prec)
-	elseif token.type == 'linear_ws' then
-		lex_indent_pull(lex_indent_state)
-		return parse_postop(prec)
 	else
 		return nil
 	end
@@ -664,6 +581,7 @@ function parse_expr(prec)
 		return nil
 	end
 	while true do
+		skip_ws()
 		local op = parse_postop(prec)
 		if op then
 			expr = op(expr)
