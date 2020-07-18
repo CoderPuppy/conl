@@ -367,9 +367,7 @@ local function parse_expr_atom()
 		while true do
 			while true do
 				local token = lex_indent_peek(lex_indent_state)
-				if token.type == 'newline' then
-					lex_indent_pull(lex_indent_state)
-				elseif token.type == 'indent' then
+				if token.type == 'newline' or token.type == 'indent' or token.type == 'linear_ws' then
 					lex_indent_pull(lex_indent_state)
 				elseif token.type == 'close_brace' then
 					lex_indent_pull(lex_indent_state)
