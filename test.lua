@@ -251,7 +251,7 @@ local function parse_expr_atom()
 			end
 			while true do
 				local token = lex_indent_pull(lex_indent_state)
-				if token.type == 'single_equal' then
+				if token.type == 'identifier' and token.text == '=' then
 					break
 				elseif token.type == 'linear_ws' then
 				else
