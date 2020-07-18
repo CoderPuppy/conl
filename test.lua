@@ -527,7 +527,7 @@ local function parse_postop(prec)
 				val = val;
 			} end
 		else
-			error(('TODO: token.type = identifier, token.text = %q'):format(token.text))
+			return nil
 		end
 	elseif token.type == 'dot' then
 		lex_indent_pull(lex_indent_state)
