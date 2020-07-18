@@ -132,13 +132,11 @@ local lex_rules = lex_make_rules {
 	{n=1, pat='}', act=lex_token 'close_brace'};
 	{n=1, pat='%[', act=lex_token 'open_bracket'};
 	{n=1, pat='%]', act=lex_token 'close_bracket'};
-	{n=1, pat='[^()%[%]{}%s\'",+%.=]+', ext_pat=true, act=lex_token 'identifier'};
+	{n=1, pat='[^()%[%]{}%s\'",%.]+', ext_pat=true, act=lex_token 'identifier'};
 	{n=1, pat='[^%S\n]+', ext_pat=true, act=lex_token 'linear_ws'};
 	{n=1, pat='\r?\n', act=lex_token 'newline'};
 	{n=1, pat=',', act=lex_token 'comma'};
-	{n=1, pat='%+', act=lex_token 'plus'};
 	{n=1, pat='%.', act=lex_token 'dot'};
-	{n=1, pat='=', act=lex_token 'single_equal'};
 }
 local lex_str_rules = lex_make_rules {
 	{n=1, pat='\'', act=lex_token 'quote'};
@@ -511,22 +509,42 @@ local function parse_postop(prec)
 			fn = head;
 			args = args;
 		} end
-	elseif token.type == 'plus' then
-		lex_indent_pull(lex_indent_state)
-		while true do
-			local token = lex_indent_peek(lex_indent_state)
-			if token.type == 'linear_ws' then
-				lex_indent_pull(lex_indent_state)
-			else
-				break
+	elseif token.type == 'identifier' then
+		if token.text == '+' then
+			lex_indent_pull(lex_indent_state)
+			while true do
+				local token = lex_indent_peek(lex_indent_state)
+				if token.type == 'linear_ws' then
+					lex_indent_pull(lex_indent_state)
+				else
+					break
+				end
 			end
+			local right = parse_expr(0) -- TODO
+			return function(head) return {
+				type = 'add';
+				left = head;
+				right = right;
+			} end
+		elseif token.text == '=' then
+			lex_indent_pull(lex_indent_state)
+			while true do
+				local token = lex_indent_peek(lex_indent_state)
+				if token.type == 'linear_ws' then
+					lex_indent_pull(lex_indent_state)
+				else
+					break
+				end
+			end
+			local val = parse_expr(0) -- TODO
+			return function(head) return {
+				type = 'assign';
+				to = head;
+				val = val;
+			} end
+		else
+			error(('TODO: token.type = identifier, token.text = %q'):format(token.text))
 		end
-		local right = parse_expr(0) -- TODO
-		return function(head) return {
-			type = 'add';
-			left = head;
-			right = right;
-		} end
 	elseif token.type == 'dot' then
 		lex_indent_pull(lex_indent_state)
 		local name
@@ -543,22 +561,6 @@ local function parse_postop(prec)
 			type = 'access';
 			head = head;
 			name = name;
-		} end
-	elseif token.type == 'single_equal' then
-		lex_indent_pull(lex_indent_state)
-		while true do
-			local token = lex_indent_peek(lex_indent_state)
-			if token.type == 'linear_ws' then
-				lex_indent_pull(lex_indent_state)
-			else
-				break
-			end
-		end
-		local val = parse_expr(0) -- TODO
-		return function(head) return {
-			type = 'assign';
-			to = head;
-			val = val;
 		} end
 	elseif token.type == 'newline' then
 		lex_indent_pull(lex_indent_state)
