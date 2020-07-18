@@ -274,6 +274,41 @@ local function parse_expr_atom()
 				name = name;
 				val = val;
 			}
+		elseif token.text == 'const' then
+			local name
+			while true do
+				local token = lex_indent_pull(lex_indent_state)
+				if token.type == 'identifier' then
+					name = token.text
+					break
+				elseif token.type == 'linear_ws' then
+				else
+					error(('TODO: token.type = %q'):format(token.type))
+				end
+			end
+			while true do
+				local token = lex_indent_pull(lex_indent_state)
+				if token.type == 'identifier' and token.text == '=' then
+					break
+				elseif token.type == 'linear_ws' then
+				else
+					error(('TODO: token.type = %q'):format(token.type))
+				end
+			end
+			while true do
+				local token = lex_indent_peek(lex_indent_state)
+				if token.type == 'linear_ws' then
+					lex_indent_pull(lex_indent_state)
+				else
+					break
+				end
+			end
+			local val = assert(parse_expr(0))
+			return {
+				type = 'const';
+				name = name;
+				val = val;
+			}
 		else
 			return {
 				type = 'var';
