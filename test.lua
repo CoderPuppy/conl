@@ -234,8 +234,9 @@ local lex_state = lex_init(h, lex_rules)
 local lex_indent_state = lex_indent_init(lex_state)
 local parse_expr
 local function parse_expr_atom()
-	local token = lex_indent_pull(lex_indent_state)
+	local token = lex_indent_peek(lex_indent_state)
 	if token.type == 'identifier' then
+		lex_indent_pull(lex_indent_state)
 		if token.text == 'let' then
 			local name
 			while true do
@@ -265,7 +266,7 @@ local function parse_expr_atom()
 					break
 				end
 			end
-			local val = parse_expr(0)
+			local val = assert(parse_expr(0))
 			return {
 				type = 'let';
 				name = name;
@@ -278,6 +279,7 @@ local function parse_expr_atom()
 			}
 		end
 	elseif token.type == 'quote' then
+		lex_indent_pull(lex_indent_state)
 		local quote = token.text
 		lex_switch_rules(lex_state, lex_str_rules)
 		local text = ''
@@ -301,7 +303,7 @@ local function parse_expr_atom()
 			text = text;
 		}
 	elseif token.type == 'open_brace' then
-		lex_indent_peek(lex_indent_state)
+		lex_indent_pull(lex_indent_state)
 		local save = lex_indent_save(lex_indent_state)
 		local ok, args = pcall(function()
 			local args = {n = 0;}
@@ -378,7 +380,7 @@ local function parse_expr_atom()
 				end
 			end
 			local ok, expr = pcall(parse_expr, 0)
-			if ok then
+			if ok and expr then
 				body.n = body.n + 1
 				body[body.n] = expr
 				save = lex_indent_save(lex_indent_state)
@@ -395,7 +397,7 @@ local function parse_expr_atom()
 			body = body;
 		}
 	elseif token.type == 'open_paren' then
-		lex_indent_peek(lex_indent_state)
+		lex_indent_pull(lex_indent_state)
 		local body = {n = 0;}
 		while true do
 			while true do
@@ -413,7 +415,7 @@ local function parse_expr_atom()
 			end
 			local save = lex_indent_save(lex_indent_state)
 			local ok, expr = pcall(parse_expr, 0)
-			if ok then
+			if ok and expr then
 				body.n = body.n + 1
 				body[body.n] = expr
 			else
@@ -428,7 +430,8 @@ local function parse_expr_atom()
 			body = body;
 		}
 	else
-		error(('TODO: token.type = %q'):format(token.type))
+		-- error(('TODO: token.type = %q'):format(token.type))
+		return nil
 	end
 end
 local function parse_postop(prec)
@@ -454,7 +457,7 @@ local function parse_postop(prec)
 				end
 			end
 			args.n = args.n + 1
-			args[args.n] = parse_expr(0)
+			args[args.n] = assert(parse_expr(0))
 			while true do
 				local token = lex_indent_pull(lex_indent_state)
 				if token.type == 'close_paren' then
@@ -491,7 +494,7 @@ local function parse_postop(prec)
 				end
 			end
 			args.n = args.n + 1
-			args[args.n] = parse_expr(0)
+			args[args.n] = assert(parse_expr(0))
 			while true do
 				local token = lex_indent_pull(lex_indent_state)
 				if token.type == 'close_bracket' then
@@ -520,7 +523,7 @@ local function parse_postop(prec)
 					break
 				end
 			end
-			local right = parse_expr(0) -- TODO
+			local right = assert(parse_expr(0))
 			return function(head) return {
 				type = 'add';
 				left = head;
@@ -536,7 +539,7 @@ local function parse_postop(prec)
 					break
 				end
 			end
-			local val = parse_expr(0) -- TODO
+			local val = assert(parse_expr(0))
 			return function(head) return {
 				type = 'assign';
 				to = head;
@@ -577,6 +580,9 @@ local function parse_postop(prec)
 end
 function parse_expr(prec)
 	local expr = parse_expr_atom()
+	if not expr then
+		return nil
+	end
 	while true do
 		local op = parse_postop(prec)
 		if op then
