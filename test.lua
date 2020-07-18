@@ -235,7 +235,9 @@ local lex_indent_state = lex_indent_init(lex_state)
 local parse_expr
 local function parse_expr_atom()
 	local token = lex_indent_peek(lex_indent_state)
-	if token.type == 'identifier' then
+	if not token then
+		return nil
+	elseif token.type == 'identifier' then
 		lex_indent_pull(lex_indent_state)
 		if token.text == 'let' then
 			local name
@@ -574,5 +576,15 @@ function parse_expr(prec)
 	end
 	return expr
 end
-local expr = parse_expr(0)
-print(pl.pretty.write(expr))
+local body = {n = 0;}
+while true do
+	local expr = parse_expr(0)
+	if expr then
+		body.n = body.n + 1
+		body[body.n] = expr
+	else
+		break
+	end
+end
+assert(lex_indent_peek(lex_indent_state) == nil)
+print(pl.pretty.write(body))
