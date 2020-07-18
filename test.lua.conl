@@ -1,89 +1,80 @@
 local pl = require 'pl.import_into' ()
 
-local function lex_init(file, rules)
-	local state = {
-		file = file;
-		rules = rules;
-		tokens = {n = 0; next = 1;};
-		buffer = '';
-		buffer_pos = 1;
-		linear_pos = 1;
+def lex = { (file, rules) in module {
+	export file
+	export def mut rules = rules
+	export def tokens = TODO
+	export def mut buffer = ''
+	export def mut buffer-pos = 1
+	export def mut linear-pos = 1
+
+	export def buffer-remaining = { #buffer - buffer-pos + 1 }
+
+	export def read = { (n) in
+		while buffer-remaining() < n {
+			let new = file.read(:, 1024 * 1024)
+			if new == nil { break }
+			if buffer_pos > 1 {
+				buffer = buffer.sub(:, buffer-pos)
+				buffer-pos = 1
+			}
+			buffer ..= new
+		}
 	}
-	return state
-end
-local function lex_read(state, n)
-	if not n then
-		n = state.rules.lookahead
-	end
-	while #state.buffer - state.buffer_pos + 1 < n do
-		local new = state.file:read(1024 * 1024)
-		if new == nil then
-			break
-		end
-		if state.buffer_pos > 1 then
-			state.buffer = state.buffer:sub(state.buffer_pos)
-			state.buffer_pos = 1
-		end
-		state.buffer = state.buffer .. new
-	end
-end
-local function lex_match(state, pat)
-	local match = table.pack(string.match(state.buffer, '^(' .. pat .. ')', state.buffer_pos))
-	if match[1] then
-		state.buffer_pos = state.buffer_pos + #match[1]
-		state.linear_pos = state.linear_pos + #match[1]
-		return table.unpack(match)
-	else
-		return nil
-	end
-end
-local function lex_peek(state)
-	while state.tokens.n < state.tokens.next do
-		lex_read(state)
-		if #state.buffer - state.buffer_pos + 1 == 0 then
+
+	export def match = { (pat) in
+		if let *match = buffer.match(:, '^(' .. pat .. ')', buffer-pos) {
+			buffer-pos += #match[1]
+			linear-pos += #match[1]
+			return *match
+		} else {
 			return nil
-		end
-		for i = 1, state.rules.n do
-			local rule = state.rules[i]
-			local start_pos = state.linear_pos
-			local match = table.pack(lex_match(state, rule.pat))
-			if match[1] then
-				if rule.ext_pat then
-					local ext_pat = rule.ext_pat
-					if ext_pat == true then
-						ext_pat = rule.pat
-					end
-					while state.buffer_pos == #state.buffer + 1 do
-						lex_read(state)
-						local ext_match = table.pack(lex_match(state, ext_pat))
-						if ext_match[1] then
-							match.n = match.n + 1
-							match[match.n] = ext_match
-						else
-							break
-						end
-					end
-				end
-				rule.act(state, start_pos, table.unpack(match, 1, match.n))
-				goto done
-			end
-		end
-		error(('no rule matched: %q'):format(state.buffer:sub(state.buffer_pos)))
-		::done::
-	end
-	return state.tokens[state.tokens.next]
-end
-local function lex_pull(state)
-	local token = lex_peek(state)
-	state.tokens[state.tokens.next] = nil
-	if state.tokens.next == state.tokens.n then
-		state.tokens.n = 0
-		state.tokens.next = 1
-	else
-		state.tokens.next = state.tokens.next + 1
-	end
-	return token
-end
+		}
+	}
+
+	export def peek = {
+		while TODO {
+			read(TODO)
+			if buffer-remaining() == 0 { return nil }
+			for rule in rules {
+				let start-pos = linear-pos
+				if let *match = match(rule.pat) {
+					if let mut ext-pat = rule.ext-pat {
+						if ext-pat == true {
+							ext-pat = rule.pat
+						}
+						while buffer-pos == #buffer + 1 {
+							read(TODO)
+							if let *ext-match = match(ext-pat) {
+								match[++] = ext-match
+							} else {
+								break
+							}
+						}
+					}
+					rule.act(start-pos, *match)
+					break
+				}
+			} else {
+				error(('no rule matched: %q').format(:, buffer.sub(:, buffer-pos)))
+			}
+		}
+		return tokens[TODO]
+	}
+
+	export def pull = {
+		let token = peek()
+		tokens[TODO] = nil
+		-- TODO
+		-- if state.tokens.next == state.tokens.n then
+		-- 	state.tokens.n = 0
+		-- 	state.tokens.next = 1
+		-- else
+		-- 	state.tokens.next = state.tokens.next + 1
+		-- end
+		return token
+	}
+} }
 local function lex_switch_rules(state, rules)
 	assert(state.tokens.n == 0)
 	state.rules = rules

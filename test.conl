@@ -1,1 +1,2 @@
-foo[bar] = 'baz'
+const foo = { (bar) in "fiz" --[[foo]] + bar + "buz" }
+foo('bar')
