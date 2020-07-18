@@ -3,7 +3,8 @@ local pl = require 'pl.import_into' ()
 def lex = { (file, rules) in module {
 	export file
 	export def mut rules = rules
-	export def tokens = TODO
+	export def tokens = []
+	export def mut next-token = 1
 	export def mut buffer = ''
 	export def mut buffer-pos = 1
 	export def mut linear-pos = 1
@@ -33,8 +34,8 @@ def lex = { (file, rules) in module {
 	}
 
 	export def peek = {
-		while TODO {
-			read(TODO)
+		while #tokens < next-token {
+			read(rules.lookahead)
 			if buffer-remaining() == 0 { return nil }
 			for rule in rules {
 				let start-pos = linear-pos
@@ -44,7 +45,7 @@ def lex = { (file, rules) in module {
 							ext-pat = rule.pat
 						}
 						while buffer-pos == #buffer + 1 {
-							read(TODO)
+							read(rules.lookahead)
 							if let *ext-match = match(ext-pat) {
 								match[++] = ext-match
 							} else {
@@ -59,122 +60,107 @@ def lex = { (file, rules) in module {
 				error(('no rule matched: %q').format(:, buffer.sub(:, buffer-pos)))
 			}
 		}
-		return tokens[TODO]
+		return tokens[next-token]
 	}
 
 	export def pull = {
 		let token = peek()
-		tokens[TODO] = nil
-		-- TODO
-		-- if state.tokens.next == state.tokens.n then
-		-- 	state.tokens.n = 0
-		-- 	state.tokens.next = 1
-		-- else
-		-- 	state.tokens.next = state.tokens.next + 1
-		-- end
+		tokens[next-token] = nil
+		if next-token == #tokens {
+			#tokens = 0
+			next-token = 1
+		} else {
+			next-token += 1
+		}
 		return token
 	}
-} }
-local function lex_switch_rules(state, rules)
-	assert(state.tokens.n == 0)
-	state.rules = rules
-end
-local function lex_push_token(state, token)
-	state.tokens.n = state.tokens.n + 1
-	state.tokens[state.tokens.n] = token
-end
-local function lex_token(typ) return function(state, start_pos, text, ...)
-	lex_push_token(state, {
-		type = typ;
-		text = text;
-		start_pos = start_pos;
-		captures = table.pack(...);
-	})
-end end
-local function lex_block(typ) return function(state, start_pos, full_text)
-	local n = 0
-	while true do
-		lex_read(state, 1)
-		local text = lex_match(state, '%=+')
-		if text then
-			n = n + #text
-			full_text = full_text .. text
-		else
-			break
-		end
-	end
-	do
-		lex_read(state, 1)
-		local text = lex_match(state, '%[')
-		if text then
-			full_text = full_text .. text
-		else
-			error(('TODO: buffer = %q'):format(state.buffer))
-		end
-	end
-	local contents = ''
-	while true do
-		lex_read(state, n + 2)
-		local text = lex_match(state, ('%%]%s%%]'):format(('='):rep(n)))
-		if text then
-			full_text = full_text .. text
-			break
-		end
-		lex_read(state, 2)
-		local text = lex_match(state, '%]?[^%]]*')
-		if text then
-			if text == '' then
-				error('TODO')
-			end
-			full_text = full_text .. text
-			contents = contents .. text
-		end
-	end
-	lex_push_token(state, {
-		type = typ;
-		text = full_text;
-		start_pos = start_pos;
-		captures = table.pack(contents);
-	})
-end end
-local function lex_save(state)
-	local save = {
-		pos = state.file:seek() - #state.buffer + state.buffer_pos - 1;
-		rules = state.rules;
-		tokens = {n = 0;};
-		linear_pos = state.linear_pos;
+
+	export def switch-rules = { (new-rules) in
+		assert(#tokens == 0)
+		rules = new-rules
 	}
-	for i = state.tokens.next, state.tokens.n do
-		save.tokens.n = save.tokens.n + 1
-		save.tokens[save.tokens.n] = state.tokens[i]
-	end
-	return save
-end
-local function lex_restore(state, save)
-	state.file:seek('set', save.pos)
-	state.rules = save.rules
-	state.tokens = {n = save.tokens.n; next = 1;}
-	for i = 1, save.tokens.n do
-		state.tokens[i] = save.tokens[i]
-	end
-	state.buffer = ''
-	state.buffer_pos = 1
-	state.linear_pos = save.linear_pos
-end
-local function lex_make_rules(rules)
-	if not rules.n then
-		rules.n = #rules
-	end
-	local n = 1
-	for i = 1, rules.n do
-		if rules[i].n > n then
-			n = rules[i].n
-		end
-	end
-	rules.lookahead = n
-	return rules
-end
-local lex_rules = lex_make_rules {
+
+	export def act-token = { (typ) in { (start-pos, text, *captures) in
+		tokens[++] = [
+			type: typ,
+			text: text,
+			start-pos: start-pos,
+			captures: captures,
+		]
+	} }
+
+	export def act-block = { (typ) in { (start-pos, mut full-text) in
+		let mut n = 0
+		while let text = (read(1); match('%=+')) {
+			n += #text
+			full-text ..= text
+		}
+		if let text = (read(1); match('%[')) {
+			full-text ..= text
+		} else {
+			error(('TODO: %q').format(:, buffer.sub(:, buffer-pos)))
+		}
+		let mut contents = ''
+		while true {
+			if let text = (read(n + 2); match('%]' .. ('=').rep(:, n) .. '%]')) {
+				full-text ..= text
+				break
+			}
+			if let text = (read(2); match('%]?[^%]]*')) {
+				if text == '' {
+					error('TODO')
+				}
+				full-text ..= text
+				contents ..= text
+			}
+		}
+		tokens[++] = [
+			type: typ,
+			text: full-text,
+			start-pos: start-pos,
+			captures: [contents],
+		]
+	} }
+
+	export def save = {
+		let save = [
+			pos: file.seek(:) - #buffer + buffer-pos - 1;
+			rules: rules,
+			tokens: [],
+			linear-pos: linear-pos,
+		]
+		for i in range(next-token, #tokens) {
+			save.tokens[++] = tokens[i]
+		}
+		return save
+	}
+
+	export def restore = { (save) in
+		file.seek(:, 'set', save.pos)
+		rules = save.rules
+		tokens = [*save.tokens]
+		next-token = 1
+		buffer = ''
+		buffer-pos = 1
+		linear-pos = save.linear-pos
+	}
+} }
+lex.make-rules = { (rules) in
+	-- TODO
+	-- if not rules.n then
+	-- 	rules.n = #rules
+	-- end
+	-- local n = 1
+	-- for i = 1, rules.n do
+	-- 	if rules[i].n > n then
+	-- 		n = rules[i].n
+	-- 	end
+	-- end
+	-- rules.lookahead = n
+	-- return rules
+}
+lex.rules = lex.make-rules([
+	[n:1, pat:'\'', act:
 	{n=1, pat='\'', act=lex_token 'quote'};
 	{n=1, pat='"', act=lex_token 'quote'};
 	{n=1, pat='%(', act=lex_token 'open_paren'};
@@ -189,8 +175,8 @@ local lex_rules = lex_make_rules {
 	{n=2, pat='%-%-([^\r\n]*)', ext_pat='([^\r\n]+)', act=lex_token 'line_comment'};
 	{n=2, pat='\r?\n', act=lex_token 'newline'};
 	{n=1, pat='[^%S\n]+', ext_pat=true, act=lex_token 'linear_ws'};
-	{n=1, pat='[^()%[%]{}%s\'",%.]+', ext_pat=true, act=lex_token 'identifier'};
-}
+	{n=1, pat='[^()%[%]{}%s\'",%.]+', ext_pat=true, act=lex_token 'identifier'},
+])
 local lex_rules_string = lex_make_rules {
 	{n=1, pat='\'', act=lex_token 'quote'};
 	{n=1, pat='"', act=lex_token 'quote'};
