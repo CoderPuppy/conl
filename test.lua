@@ -11,8 +11,11 @@ local function lex_init(file, rules)
 	}
 	return state
 end
-local function lex_read(state)
-	while #state.buffer - state.buffer_pos + 1 < state.rules.lookahead do
+local function lex_read(state, n)
+	if not n then
+		n = state.rules.lookahead
+	end
+	while #state.buffer - state.buffer_pos + 1 < n do
 		local new = state.file:read(1024 * 1024)
 		if new == nil then
 			break
@@ -24,6 +27,16 @@ local function lex_read(state)
 		state.buffer = state.buffer .. new
 	end
 end
+local function lex_match(state, pat)
+	local match = table.pack(string.match(state.buffer, '^(' .. pat .. ')', state.buffer_pos))
+	if match[1] then
+		state.buffer_pos = state.buffer_pos + #match[1]
+		state.linear_pos = state.linear_pos + #match[1]
+		return table.unpack(match)
+	else
+		return nil
+	end
+end
 local function lex_peek(state)
 	while state.tokens.n < state.tokens.next do
 		lex_read(state)
@@ -33,10 +46,8 @@ local function lex_peek(state)
 		for i = 1, state.rules.n do
 			local rule = state.rules[i]
 			local start_pos = state.linear_pos
-			local match = table.pack(string.match(state.buffer, '^(' .. rule.pat .. ')', state.buffer_pos))
+			local match = table.pack(lex_match(state, rule.pat))
 			if match[1] then
-				state.buffer_pos = state.buffer_pos + #match[1]
-				state.linear_pos = state.linear_pos + #match[1]
 				if rule.ext_pat then
 					local ext_pat = rule.ext_pat
 					if ext_pat == true then
@@ -44,10 +55,8 @@ local function lex_peek(state)
 					end
 					while state.buffer_pos == #state.buffer + 1 do
 						lex_read(state)
-						local ext_match = table.pack(string.match(state.buffer, '^(' .. ext_pat .. ')', state.buffer_pos))
+						local ext_match = table.pack(lex_match(state, ext_pat))
 						if ext_match[1] then
-							state.buffer_pos = state.buffer_pos + #ext_match[1]
-							state.linear_pos = state.linear_pos + #ext_match[1]
 							match.n = match.n + 1
 							match[match.n] = ext_match
 						else
@@ -83,8 +92,59 @@ local function lex_push_token(state, token)
 	state.tokens.n = state.tokens.n + 1
 	state.tokens[state.tokens.n] = token
 end
-local function lex_token(typ) return function(state, start_pos, text)
-	lex_push_token(state, { type = typ, text = text, start_pos = start_pos })
+local function lex_token(typ) return function(state, start_pos, text, ...)
+	lex_push_token(state, {
+		type = typ;
+		text = text;
+		start_pos = start_pos;
+		captures = table.pack(...);
+	})
+end end
+local function lex_block(typ) return function(state, start_pos, full_text)
+	local n = 0
+	while true do
+		lex_read(state, 1)
+		local text = lex_match(state, '%=+')
+		if text then
+			n = n + #text
+			full_text = full_text .. text
+		else
+			break
+		end
+	end
+	do
+		lex_read(state, 1)
+		local text = lex_match(state, '%[')
+		if text then
+			full_text = full_text .. text
+		else
+			error(('TODO: buffer = %q'):format(state.buffer))
+		end
+	end
+	local contents = ''
+	while true do
+		lex_read(state, n + 2)
+		local text = lex_match(state, ('%%]%s%%]'):format(('='):rep(n)))
+		if text then
+			full_text = full_text .. text
+			break
+		end
+		lex_read(state, 2)
+		local text = lex_match(state, '%]?[^%]]*')
+		if text then
+			if text == '' then
+				error('TODO')
+			end
+			full_text = full_text .. text
+			contents = contents .. text
+		end
+	end
+	lex_push_token(state, {
+		type = typ;
+		text = full_text;
+		start_pos = start_pos;
+		captures = table.pack(contents);
+	})
 end end
 local function lex_save(state)
 	local save = {
@@ -132,13 +192,15 @@ local lex_rules = lex_make_rules {
 	{n=1, pat='}', act=lex_token 'close_brace'};
 	{n=1, pat='%[', act=lex_token 'open_bracket'};
 	{n=1, pat='%]', act=lex_token 'close_bracket'};
-	{n=1, pat='[^()%[%]{}%s\'",%.]+', ext_pat=true, act=lex_token 'identifier'};
-	{n=1, pat='[^%S\n]+', ext_pat=true, act=lex_token 'linear_ws'};
-	{n=1, pat='\r?\n', act=lex_token 'newline'};
 	{n=1, pat=',', act=lex_token 'comma'};
 	{n=1, pat='%.', act=lex_token 'dot'};
+	{n=3, pat='%-%-%[', ext_pat='[^\r\n]+', act=lex_block 'block_comment'};
+	{n=2, pat='%-%-([^\r\n]*)', ext_pat='([^\r\n]+)', act=lex_token 'line_comment'};
+	{n=2, pat='\r?\n', act=lex_token 'newline'};
+	{n=1, pat='[^%S\n]+', ext_pat=true, act=lex_token 'linear_ws'};
+	{n=1, pat='[^()%[%]{}%s\'",%.]+', ext_pat=true, act=lex_token 'identifier'};
 }
-local lex_str_rules = lex_make_rules {
+local lex_rules_string = lex_make_rules {
 	{n=1, pat='\'', act=lex_token 'quote'};
 	{n=1, pat='"', act=lex_token 'quote'};
 	{n=2, pat='\\[nrte\'"\\]', act=lex_token 'escape'};
@@ -318,7 +380,7 @@ local function parse_expr_atom()
 	elseif token.type == 'quote' then
 		lex_indent_pull(lex_indent_state)
 		local quote = token.text
-		lex_switch_rules(lex_state, lex_str_rules)
+		lex_switch_rules(lex_state, lex_rules_string)
 		local text = ''
 		while true do
 			token = lex_pull(lex_state)
