@@ -374,6 +374,49 @@ local function parse_decl()
 		val = val;
 	}
 end
+local function parse_block(end_token_type)
+	local body = {n = 0;}
+	while true do
+		skip_ws()
+		local token = lex_indent_peek(lex_indent_state)
+		if token.type == end_token_type then
+			lex_indent_pull(lex_indent_state)
+			break
+		end
+		local expr = parse_expr 'block'
+		if expr == nil then
+			if end_token_type then
+				error 'TODO'
+			else
+				break
+			end
+		end
+		body.n = body.n + 1
+		body[body.n] = expr
+	end
+	return body
+end
+local function parse_args(end_token_type)
+	local args = {n = 0;}
+	while true do
+		skip_ws()
+		local token = lex_indent_peek(lex_indent_state)
+		if token.type == end_token_type then
+			lex_indent_pull(lex_indent_state)
+			break
+		end
+		args.n = args.n + 1
+		args[args.n] = assert(parse_expr 'block')
+		token = lex_indent_pull(lex_indent_state)
+		if token.type == end_token_type then
+			break
+		elseif token.type == 'comma' then
+		else
+			error(('TODO: token.type = %q'):format(token.type))
+		end
+	end
+	return args
+end
 local function parse_expr_atom()
 	local expr = parse_decl()
 	if expr then
@@ -463,18 +506,7 @@ local function parse_expr_atom()
 			lex_indent_restore(lex_indent_state, save)
 			return nil
 		end)
-		local body = {n = 0;}
-		while true do
-			skip_ws()
-			local token = lex_indent_peek(lex_indent_state)
-			if token.type == 'close_brace' then
-				lex_indent_pull(lex_indent_state)
-				goto done
-			end
-			body.n = body.n + 1
-			body[body.n] = assert(parse_expr 'block')
-		end
-		::done::
+		local body = parse_block 'close_brace'
 		return {
 			type = 'fn';
 			args = args;
@@ -482,18 +514,7 @@ local function parse_expr_atom()
 		}
 	elseif token.type == 'open_paren' then
 		lex_indent_pull(lex_indent_state)
-		local body = {n = 0;}
-		while true do
-			skip_ws()
-			local token = lex_indent_peek(lex_indent_state)
-			if token.type == 'close_paren' then
-				lex_indent_pull(lex_indent_state)
-				goto done
-			end
-			body.n = body.n + 1
-			body[body.n] = assert(parse_expr 'block')
-		end
-		::done::
+		local body = parse_block 'close_paren'
 		return {
 			type = 'block';
 			body = body;
@@ -509,26 +530,7 @@ local function parse_postop(prec)
 		return nil
 	elseif token.type == 'open_paren' then
 		lex_indent_pull(lex_indent_state)
-		local args = {n = 0;}
-		while true do
-			skip_ws()
-			local token = lex_indent_peek(lex_indent_state)
-			if token.type == 'close_paren' then
-				lex_indent_pull(lex_indent_state)
-				goto args_done
-			end
-			args.n = args.n + 1
-			args[args.n] = assert(parse_expr 'block')
-			token = lex_indent_pull(lex_indent_state)
-			if token.type == 'close_paren' then
-				goto args_done
-			elseif token.type == 'comma' then
-				break
-			else
-				error(('TODO: token.type = %q'):format(token.type))
-			end
-		end
-		::args_done::
+		local args = parse_args 'close_paren'
 		return function(head) return {
 			type = 'call';
 			fn = head;
@@ -536,25 +538,7 @@ local function parse_postop(prec)
 		} end
 	elseif token.type == 'open_bracket' then
 		lex_indent_pull(lex_indent_state)
-		local args = {n = 0;}
-		while true do
-			skip_ws()
-			local token = lex_indent_peek(lex_indent_state)
-			if token.type == 'close_paren' then
-				lex_indent_pull(lex_indent_state)
-				goto args_done
-			end
-			args.n = args.n + 1
-			args[args.n] = assert(parse_expr 'block')
-			token = lex_indent_pull(lex_indent_state)
-			if token.type == 'close_bracket' then
-				goto args_done
-			elseif token.type == 'comma' then
-			else
-				error(('TODO: token.type = %q'):format(token.type))
-			end
-		end
-		::args_done::
+		local args = parse_args 'close_bracket'
 		return function(head) return {
 			type = 'index';
 			fn = head;
