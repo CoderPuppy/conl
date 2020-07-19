@@ -1,2 +1,2 @@
-const foo = { (bar) in "fiz" --[[foo]] + bar + "buz" }
+def test.foo = { (bar) in "fiz" --[[foo]] + bar + "buz" }
 foo('bar')

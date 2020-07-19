@@ -317,60 +317,57 @@ local function skip_ws()
 	end
 end
 local parse_expr
+local function parse_decl()
+	local token = lex_indent_peek(lex_indent_state)
+	if not token then return nil end
+	if token.type ~= 'identifier' then return nil end
+	if token.text ~= 'let' and token.text ~= 'def' then return nil end
+	lex_indent_pull(lex_indent_state)
+	skip_ws()
+	local const = token.text == 'def'
+	local save = lex_indent_save(lex_indent_state)
+	local ok, mod, name = pcall(function()
+		local mod = parse_expr(0)
+		assert(mod.type == 'access')
+		return mod.head, mod.name
+	end)
+	if ok then
+	else
+		print(mod, debug.traceback())
+		lex_indent_restore(lex_indent_state, save)
+		mod = nil
+		token = lex_indent_pull(lex_indent_state)
+		assert(token.type == 'identifier')
+		name = token.text
+	end
+	skip_ws()
+	token = lex_indent_pull(lex_indent_state)
+	assert(token.type == 'identifier' and token.text == '=', ('TODO: token = %q'):format(token.text))
+	skip_ws()
+	local val = parse_expr(0)
+	return {
+		type = 'decl';
+		const = const;
+		mod = mod;
+		name = name;
+		val = val;
+	}
+end
 local function parse_expr_atom()
+	local expr = parse_decl()
+	if expr then
+		return expr
+	end
+
 	local token = lex_indent_peek(lex_indent_state)
 	if not token then
 		return nil
 	elseif token.type == 'identifier' then
 		lex_indent_pull(lex_indent_state)
-		if token.text == 'let' then
-			local name
-			while true do
-				local token = lex_indent_pull(lex_indent_state)
-				if token.type == 'identifier' then
-					name = token.text
-					break
-				elseif token.type == 'linear_ws' then
-				else
-					error(('TODO: token.type = %q'):format(token.type))
-				end
-			end
-			skip_ws()
-			while true do
-				local token = lex_indent_pull(lex_indent_state)
-				if token.type == 'identifier' and token.text == '=' then
-					break
-					error(('TODO: token.type = %q'):format(token.type))
-				end
-			end
-			skip_ws()
-			local val = assert(parse_expr(0))
-			return {
-				type = 'let';
-				name = name;
-				val = val;
-			}
-		elseif token.text == 'const' then
-			skip_ws()
-			local token = lex_indent_pull(lex_indent_state)
-			assert(token.type == 'identifier')
-			local name = token.text
-			skip_ws()
-			local token = lex_indent_pull(lex_indent_state)
-			assert(token.type == 'identifier' and token.text == '=')
-			skip_ws()
-			local val = assert(parse_expr(0))
-			return {
-				type = 'const';
-				name = name;
-				val = val;
-			}
-		else
-			return {
-				type = 'var';
-				name = token.text;
-			}
-		end
+		return {
+			type = 'var';
+			name = token.text;
+		}
 	elseif token.type == 'quote' then
 		lex_indent_pull(lex_indent_state)
 		local quote = token.text
