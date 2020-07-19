@@ -1,87 +1,122 @@
 local pl = require 'pl.import_into' ()
 
-def lex = { (file, rules) in module {
-	export file
-	export def mut rules = rules
-	export def tokens = []
-	export def mut next-token = 1
-	export def mut buffer = ''
-	export def mut buffer-pos = 1
-	export def mut linear-pos = 1
+def lex = module({
+	export def t = struct([
+		file: lua.any,
+		rules: lex.rules,
+		tokens: list(lua.any),
+		next-token: int,
+		buffer: string,
+		buffer-pos: int,
+		linear-pos: int,
+	])
 
-	export def buffer-remaining = { #buffer - buffer-pos + 1 }
+	export def init = { (file, rules) in t.make([
+		file: file,
+		rules: rules,
+		tokens: [],
+		next-token: 1,
+		buffer: '',
+		buffer-pos: 1,
+		linear-pos: 1,
+	]) }
 
-	export def read = { (n) in
-		while buffer-remaining() < n {
-			let new = file.read(:, 1024 * 1024)
+	export def t.instance.buffer-remaining = { (self) in #self.buffer - self.buffer-pos + 1 }
+
+	export def t.instance.read = { (self, n) in
+		while self.buffer-remaining() < n {
+			let new = self.file.read(:, 1024 * 1024)
 			if new == nil { break }
-			if buffer_pos > 1 {
-				buffer = buffer.sub(:, buffer-pos)
-				buffer-pos = 1
+			if self.buffer-pos > 1 {
+				self.buffer = self.buffer.sub(:, self.buffer-pos)
+				self.buffer-pos = 1
 			}
-			buffer ..= new
+			self.buffer ..= new
 		}
 	}
 
-	export def match = { (pat) in
-		if let *match = buffer.match(:, '^(' .. pat .. ')', buffer-pos) {
-			buffer-pos += #match[1]
-			linear-pos += #match[1]
+	export def t.instance.match = { (self, pat) in
+		if let *match = self.buffer.match(:, '^(' .. pat .. ')', self.buffer-pos) {
+			self.buffer-pos += #match[1]
+			self.linear-pos += #match[1]
 			return *match
 		} else {
 			return nil
 		}
 	}
 
-	export def peek = {
-		while #tokens < next-token {
-			read(rules.lookahead)
-			if buffer-remaining() == 0 { return nil }
-			for rule in rules {
-				let start-pos = linear-pos
-				if let *match = match(rule.pat) {
+	export def t.instance.peek = { (self) in
+		while #self.tokens < self.next-token {
+			self.read(rules.lookahead)
+			if self.buffer-remaining() == 0 { return nil }
+			for rule in self.rules {
+				let start-pos = self.linear-pos
+				if let *match = self.match(rule.pat) {
 					if let mut ext-pat = rule.ext-pat {
 						if ext-pat == true {
 							ext-pat = rule.pat
 						}
-						while buffer-pos == #buffer + 1 {
-							read(rules.lookahead)
-							if let *ext-match = match(ext-pat) {
+						while self.buffer-pos == #self.buffer + 1 {
+							self.read(self.rules.lookahead)
+							if let *ext-match = self.match(ext-pat) {
 								match[++] = ext-match
 							} else {
 								break
 							}
 						}
 					}
-					rule.act(start-pos, *match)
+					rule.act(self, start-pos, *match)
 					break
 				}
 			} else {
-				error(('no rule matched: %q').format(:, buffer.sub(:, buffer-pos)))
+				error(('no rule matched: %q').format(:, self.buffer.sub(:, self.buffer-pos)))
 			}
 		}
-		return tokens[next-token]
+		return self.tokens[self.next-token]
 	}
 
-	export def pull = {
-		let token = peek()
-		tokens[next-token] = nil
-		if next-token == #tokens {
-			#tokens = 0
-			next-token = 1
+	export def t.instance.pull = { (self) in
+		let token = self.peek()
+		self.tokens[self.next-token] = nil
+		if self.next-token == #self.tokens {
+			#self.tokens = 0
+			self.next-token = 1
 		} else {
-			next-token += 1
+			self.next-token += 1
 		}
 		return token
 	}
 
-	export def switch-rules = { (new-rules) in
-		assert(#tokens == 0)
-		rules = new-rules
+	export def t.instance.switch-rules = { (self, new-rules) in
+		assert(#self.tokens == 0)
+		self.rules = new-rules
 	}
 
-	export def act-token = { (typ) in { (start-pos, text, *captures) in
-		tokens[++] = [
+	export def t.instance.save = { (self) in
+		let save = [
+			pos: self.file.seek(:) - #self.buffer + self.buffer-pos - 1;
+			rules: self.rules,
+			tokens: [],
+			linear-pos: self.linear-pos,
+		]
+		for i in range(self.next-token, #self.tokens) {
+			save.tokens[++] = self.tokens[i]
+		}
+		return save
+	}
+
+	export def t.instance.restore = { (self, save) in
+		self.file.seek(:, 'set', save.pos)
+		self.rules = save.rules
+		self.tokens = [*save.tokens]
+		self.next-token = 1
+		self.buffer = ''
+		self.buffer-pos = 1
+		self.linear-pos = save.linear-pos
+	}
+
+	export def act-token = { (typ) in { (self, start-pos, text, *captures) in
+		self.tokens[++] = [
 			type: typ,
 			text: text,
 			start-pos: start-pos,
@@ -89,24 +124,24 @@ def lex = { (file, rules) in module {
 		]
 	} }
 
-	export def act-block = { (typ) in { (start-pos, mut full-text) in
+	export def act-block = { (typ) in { (self, start-pos, mut full-text) in
 		let mut n = 0
-		while let text = (read(1); match('%=+')) {
+		while let text = (self.read(1); self.match('%=+')) {
 			n += #text
 			full-text ..= text
 		}
-		if let text = (read(1); match('%[')) {
+		if let text = (self.read(1); self.match('%[')) {
 			full-text ..= text
 		} else {
-			error(('TODO: %q').format(:, buffer.sub(:, buffer-pos)))
+			error(('TODO: %q').format(:, self.buffer.sub(:, self.buffer-pos)))
 		}
 		let mut contents = ''
 		while true {
-			if let text = (read(n + 2); match('%]' .. ('=').rep(:, n) .. '%]')) {
+			if let text = (self.read(n + 2); self.match('%]' .. ('=').rep(:, n) .. '%]')) {
 				full-text ..= text
 				break
 			}
-			if let text = (read(2); match('%]?[^%]]*')) {
+			if let text = (self.read(2); self.match('%]?[^%]]*')) {
 				if text == '' {
 					error('TODO')
 				}
@@ -114,7 +149,7 @@ def lex = { (file, rules) in module {
 				contents ..= text
 			}
 		}
-		tokens[++] = [
+		self.tokens[++] = [
 			type: typ,
 			text: full-text,
 			start-pos: start-pos,
@@ -122,151 +157,133 @@ def lex = { (file, rules) in module {
 		]
 	} }
 
-	export def save = {
-		let save = [
-			pos: file.seek(:) - #buffer + buffer-pos - 1;
-			rules: rules,
-			tokens: [],
-			linear-pos: linear-pos,
-		]
-		for i in range(next-token, #tokens) {
-			save.tokens[++] = tokens[i]
+	export def make-rules = { (rules) in
+		-- TODO
+		-- if not rules.n then
+		-- 	rules.n = #rules
+		-- end
+		-- local n = 1
+		-- for i = 1, rules.n do
+		-- 	if rules[i].n > n then
+		-- 		n = rules[i].n
+		-- 	end
+		-- end
+		-- rules.lookahead = n
+		-- return rules
+	}
+
+	export def rules-t = TODO
+
+	export def rules = make-rules([
+		[n:1, pat:'\'', act:act-token('quote')],
+		[n:1, pat:'"', act:act-token('quote')],
+		[n:1, pat:'%(', act:act-token('open_paren')],
+		[n:1, pat:'%)', act:act-token('close_paren')],
+		[n:1, pat:'{', act:act-token('open_brace')],
+		[n:1, pat:'}', act:act-token('close_brace')],
+		[n:1, pat:'%[', act:act-token('open_bracket')],
+		[n:1, pat:'%]', act:act-token('close_bracket')],
+		[n:1, pat:',', act:act-token('comma')],
+		[n:1, pat:'%.', act:act-token('dot')],
+		[n:3, pat:'%-%-%[', ext_pat:'[^\r\n]+', act:act-block('block_comment')],
+		[n:2, pat:'%-%-([^\r\n]*)', ext_pat:'([^\r\n]+)', act:act-token('line_comment')],
+		[n:2, pat:'\r?\n', act:act-token('newline')],
+		[n:1, pat:'[^%S\n]+', ext_pat:true, act:act-token('linear_ws')],
+		[n:1, pat:'[^()%[%]{}%s\'",%.]+', ext_pat:true, act:act-token('identifier')],
+	])
+	export def rules-string = make-rules([
+		[n:1, pat:'\'', act:act-token('quote')],
+		[n:1, pat:'"', act:act-token('quote')],
+		[n:2, pat:'\\[nrte\'"\\]', act:act-token('escape')],
+		[n:1, pat:'[^\\\'"]+', ext_pat:true, act:act-token('text')],
+	])
+})
+
+def lex-indent = module({
+	export def t = struct([
+		lex: lex.t,
+		indent: maybe(list(string)),
+		pending: maybe(lua.any),
+	])
+
+	export def init = { (lex) in t.make([
+		lex: lex,
+		indent: nil,
+		pending: nil,
+	]) }
+
+	export def t.instance.peek = { (self) in
+		if let p = self.pending {
+			return p
+		} else {
+			let mut token = self.lex.peek()
+			if self.indent == nil {
+				let mut indent = ''
+				while token.type == 'linear_ws' {
+					indent ..= token.text
+					self.lex.pull()
+					token = self.lex.peek()
+				}
+				self.indent = [indent]
+			}
+			return token
 		}
+	}
+
+	export def t.instance.pull = { (self) in
+		let token = self.peek()
+		if self.pending {
+			self.pending = nil
+		} else {
+			self.lex.pull()
+			if token && token.type == 'newline' {
+				let mut new-indent = ''
+				let eof = !self.lex.peek()
+				let mut next-token
+				while true {
+					next-token = self.lex.peek()
+					if !next-token || next-token.type != 'linear_ws' {
+						break
+					}
+					self.lex.pull()
+					new-indent ..= next-token.text
+				}
+				if next-token && next-token.type != 'newline' {
+					let cur-indent = self.indent[#self.indent]
+					if new-indent == cur-indent {
+					} else if new-indent.sub(1, #cur-indent) == cur-indent {
+						self.indent[++] = new-indent
+						self.pending = [ type: 'indent', relative: new-indent.sub(#cur-indent + 1) ]
+					} else if cur-indent.sub(1, #new-indent) == new-indent {
+						if #self.indent == 1 && !eof {
+							-- the `not eof` is to accept a trailing newline (unix style), which would not have any indentation after it
+							error(('dedent below initial level: old = %q, new = %q').format(cur-indent, new-indent))
+						}
+						self.indent[#self.indent] = nil
+						self.pending = [ type: 'dedent', relative: cur-indent.sub(#new.indent + 1) ]
+					} else {
+						error(('bad indentation: old = %q, new = %q').format(cur-indent, new-indent))
+					}
+				}
+			}
+		}
+	}
+
+	export def t.instance.save = { (self) in
+		let save = [
+			lex: self.lex.save(),
+			pending: self.pending,
+			indent: [*self.indent],
+		]
 		return save
 	}
 
-	export def restore = { (save) in
-		file.seek(:, 'set', save.pos)
-		rules = save.rules
-		tokens = [*save.tokens]
-		next-token = 1
-		buffer = ''
-		buffer-pos = 1
-		linear-pos = save.linear-pos
+	export def t.instance.restore = { (self, save) in
+		self.lex.restore(save.lex)
+		self.pending = save.pending
+		self.indent = [*save.indent]
 	}
-} }
-lex.make-rules = { (rules) in
-	-- TODO
-	-- if not rules.n then
-	-- 	rules.n = #rules
-	-- end
-	-- local n = 1
-	-- for i = 1, rules.n do
-	-- 	if rules[i].n > n then
-	-- 		n = rules[i].n
-	-- 	end
-	-- end
-	-- rules.lookahead = n
-	-- return rules
-}
-lex.rules = lex.make-rules([
-	[n:1, pat:'\'', act:
-	{n=1, pat='\'', act=lex_token 'quote'};
-	{n=1, pat='"', act=lex_token 'quote'};
-	{n=1, pat='%(', act=lex_token 'open_paren'};
-	{n=1, pat='%)', act=lex_token 'close_paren'};
-	{n=1, pat='{', act=lex_token 'open_brace'};
-	{n=1, pat='}', act=lex_token 'close_brace'};
-	{n=1, pat='%[', act=lex_token 'open_bracket'};
-	{n=1, pat='%]', act=lex_token 'close_bracket'};
-	{n=1, pat=',', act=lex_token 'comma'};
-	{n=1, pat='%.', act=lex_token 'dot'};
-	{n=3, pat='%-%-%[', ext_pat='[^\r\n]+', act=lex_block 'block_comment'};
-	{n=2, pat='%-%-([^\r\n]*)', ext_pat='([^\r\n]+)', act=lex_token 'line_comment'};
-	{n=2, pat='\r?\n', act=lex_token 'newline'};
-	{n=1, pat='[^%S\n]+', ext_pat=true, act=lex_token 'linear_ws'};
-	{n=1, pat='[^()%[%]{}%s\'",%.]+', ext_pat=true, act=lex_token 'identifier'},
-])
-local lex_rules_string = lex_make_rules {
-	{n=1, pat='\'', act=lex_token 'quote'};
-	{n=1, pat='"', act=lex_token 'quote'};
-	{n=2, pat='\\[nrte\'"\\]', act=lex_token 'escape'};
-	{n=1, pat='[^\\\'"]+', ext_pat=true, act=lex_token 'text'};
-}
-
-local function lex_indent_init(lex_state)
-	local state = {
-		lex = lex_state;
-		indent = nil;
-		pending = nil;
-	}
-	return state
-end
-local function lex_indent_peek(state)
-	if state.pending then
-		return state.pending
-	else
-		local token = lex_peek(state.lex)
-		if state.indent == nil then
-			local indent = ''
-			while token.type == 'linear_ws' do
-				indent = indent .. token.text
-				lex_pull(state.lex)
-				token = lex_peek(state.lex)
-			end
-			state.indent = {indent}
-		end
-		return token
-	end
-end
-local function lex_indent_pull(state)
-	local token = lex_indent_peek(state)
-	if state.pending then
-		state.pending = nil
-	else
-		lex_pull(state.lex)
-		if token and token.type == 'newline' then
-			local new_indent = ''
-			local eof = not lex_peek(state.lex)
-			local next_token
-			while true do
-				next_token = lex_peek(state.lex)
-				if not next_token or next_token.type ~= 'linear_ws' then
-					break
-				end
-				lex_pull(state.lex)
-				new_indent = new_indent .. next_token.text
-			end
-			if next_token and next_token.type ~= 'newline' then
-				local cur_indent = state.indent[#state.indent]
-				if new_indent == cur_indent then
-				elseif new_indent:sub(1, #cur_indent) == cur_indent then
-					state.indent[#state.indent + 1] = new_indent
-					state.pending = { type = 'indent'; relative = new_indent:sub(#cur_indent + 1); }
-				elseif cur_indent:sub(1, #new_indent) == new_indent then
-					if #state.indent == 1 and not eof then
-						-- the `not eof` is to accept a trailing newline (unix style), which would not have any indentation after it
-						error(('dedent below initial level: old = %q, new = %q'):format(cur_indent, new_indent))
-					end
-					state.indent[#state.indent] = nil
-					state.pending = { type = 'dedent'; relative = cur_indent:sub(#new_indent + 1); }
-				else
-					error(('bad indentation: old = %q, new = %q'):format(cur_indent, new_indent))
-				end
-			end
-		end
-	end
-	return token
-end
-local function lex_indent_save(state)
-	local save = {
-		lex = lex_save(state.lex);
-		pending = state.pending;
-		indent = {};
-	}
-	for i = 1, #state.indent do
-		save.indent[i] = state.indent[i]
-	end
-	return save
-end
-local function lex_indent_restore(state, save)
-	lex_restore(state.lex, save.lex)
-	state.pending = save.pending
-	state.indent = {}
-	for i = 1, #save.indent do
-		state.indent[i] = save.indent[i]
-	end
-end
+})
 
 local h = io.open('test.conl', 'r')
 local lex_state = lex_init(h, lex_rules)
