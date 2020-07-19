@@ -367,6 +367,7 @@ local function parse_decl()
 	local val = parse_expr 'assign'
 	return {
 		type = 'decl';
+		export = false;
 		const = const;
 		mod = mod;
 		name = name;
@@ -384,10 +385,22 @@ local function parse_expr_atom()
 		return nil
 	elseif token.type == 'identifier' then
 		lex_indent_pull(lex_indent_state)
-		return {
-			type = 'var';
-			name = token.text;
-		}
+		if token.text == 'export' then
+			skip_ws()
+
+			local decl = parse_decl()
+			if decl then
+				decl.export = true
+				return decl
+			end
+
+			error('TODO')
+		else
+			return {
+				type = 'var';
+				name = token.text;
+			}
+		end
 	elseif token.type == 'quote' then
 		lex_indent_pull(lex_indent_state)
 		local quote = token.text

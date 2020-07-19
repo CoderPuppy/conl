@@ -1,2 +1,2 @@
-def test.foo = { (bar) in "fiz" --[[foo]] + bar + "buz" }
+export def test.foo = { (bar) in "fiz" --[[foo]] + bar + "buz" }
 foo('bar')
