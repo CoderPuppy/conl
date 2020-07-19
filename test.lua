@@ -316,6 +316,29 @@ local function skip_ws()
 		end
 	end
 end
+local precedence = {
+	decl = {
+		dot = true;
+	};
+	assign = {
+		plus = true;
+		assign = true;
+	};
+	block = {
+		plus = true;
+		assign = true;
+	};
+	plus = {
+		dot = true;
+	};
+}
+do
+	local global = {}
+	for k, v in pairs(precedence) do
+		global[k] = true
+	end
+	precedence.global = global
+end
 local parse_expr
 local function parse_decl()
 	local token = lex_indent_peek(lex_indent_state)
@@ -327,7 +350,7 @@ local function parse_decl()
 	local const = token.text == 'def'
 	local save = lex_indent_save(lex_indent_state)
 	local ok, mod, name = xpcall(function()
-		local mod = parse_expr(0)
+		local mod = parse_expr 'decl'
 		assert(mod.type == 'access')
 		return mod.head, mod.name
 	end, function(err)
@@ -341,7 +364,7 @@ local function parse_decl()
 	token = lex_indent_pull(lex_indent_state)
 	assert(token.type == 'identifier' and token.text == '=', ('TODO: token = %q'):format(token.text))
 	skip_ws()
-	local val = parse_expr(0)
+	local val = parse_expr 'assign'
 	return {
 		type = 'decl';
 		const = const;
@@ -436,7 +459,7 @@ local function parse_expr_atom()
 				goto done
 			end
 			body.n = body.n + 1
-			body[body.n] = assert(parse_expr(0))
+			body[body.n] = assert(parse_expr 'block')
 		end
 		::done::
 		return {
@@ -455,7 +478,7 @@ local function parse_expr_atom()
 				goto done
 			end
 			body.n = body.n + 1
-			body[body.n] = assert(parse_expr(0))
+			body[body.n] = assert(parse_expr 'block')
 		end
 		::done::
 		return {
@@ -482,7 +505,7 @@ local function parse_postop(prec)
 				goto args_done
 			end
 			args.n = args.n + 1
-			args[args.n] = assert(parse_expr(0))
+			args[args.n] = assert(parse_expr 'block')
 			token = lex_indent_pull(lex_indent_state)
 			if token.type == 'close_paren' then
 				goto args_done
@@ -509,7 +532,7 @@ local function parse_postop(prec)
 				goto args_done
 			end
 			args.n = args.n + 1
-			args[args.n] = assert(parse_expr(0))
+			args[args.n] = assert(parse_expr 'block')
 			token = lex_indent_pull(lex_indent_state)
 			if token.type == 'close_bracket' then
 				goto args_done
@@ -526,9 +549,10 @@ local function parse_postop(prec)
 		} end
 	elseif token.type == 'identifier' then
 		if token.text == '+' then
+			if not precedence[prec].plus then return nil end
 			lex_indent_pull(lex_indent_state)
 			skip_ws()
-			local right = assert(parse_expr(0))
+			local right = assert(parse_expr 'plus')
 			return function(head) return {
 				type = 'binop';
 				op = '+';
@@ -536,9 +560,10 @@ local function parse_postop(prec)
 				right = right;
 			} end
 		elseif token.text == '=' then
+			if not precedence[prec].assign then return nil end
 			lex_indent_pull(lex_indent_state)
 			skip_ws()
-			local val = assert(parse_expr(0))
+			local val = assert(parse_expr 'assign')
 			return function(head) return {
 				type = 'assign';
 				to = head;
@@ -548,6 +573,7 @@ local function parse_postop(prec)
 			return nil
 		end
 	elseif token.type == 'dot' then
+		if not precedence[prec].dot then return nil end
 		lex_indent_pull(lex_indent_state)
 		local name
 		while true do
@@ -569,6 +595,8 @@ local function parse_postop(prec)
 	end
 end
 function parse_expr(prec)
+	assert(type(prec) == 'string', prec)
+	assert(precedence[prec], prec)
 	local expr = parse_expr_atom()
 	if not expr then
 		return nil
@@ -586,7 +614,7 @@ function parse_expr(prec)
 end
 local body = {n = 0;}
 while true do
-	local expr = parse_expr(0)
+	local expr = parse_expr 'global'
 	if expr then
 		body.n = body.n + 1
 		body[body.n] = expr
