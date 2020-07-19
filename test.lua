@@ -326,20 +326,17 @@ local function parse_decl()
 	skip_ws()
 	local const = token.text == 'def'
 	local save = lex_indent_save(lex_indent_state)
-	local ok, mod, name = pcall(function()
+	local ok, mod, name = xpcall(function()
 		local mod = parse_expr(0)
 		assert(mod.type == 'access')
 		return mod.head, mod.name
-	end)
-	if ok then
-	else
-		print(mod, debug.traceback())
+	end, function(err)
+		print(err, debug.traceback())
 		lex_indent_restore(lex_indent_state, save)
-		mod = nil
 		token = lex_indent_pull(lex_indent_state)
 		assert(token.type == 'identifier')
-		name = token.text
-	end
+		return nil, token.text
+	end)
 	skip_ws()
 	token = lex_indent_pull(lex_indent_state)
 	assert(token.type == 'identifier' and token.text == '=', ('TODO: token = %q'):format(token.text))
@@ -396,7 +393,7 @@ local function parse_expr_atom()
 		lex_indent_pull(lex_indent_state)
 		skip_ws()
 		local save = lex_indent_save(lex_indent_state)
-		local ok, args = pcall(function()
+		local ok, args = xpcall(function()
 			local args = {n = 0;}
 			local token = lex_indent_pull(lex_indent_state)
 			assert(token.type == 'open_paren')
@@ -425,13 +422,11 @@ local function parse_expr_atom()
 			token = lex_indent_pull(lex_indent_state)
 			assert(token.type == 'identifier' and token.text == 'in')
 			return args
-		end)
-		if ok then
-		else
-			print(args, debug.traceback())
-			args = nil
+		end, function(err)
+			print(err, debug.traceback())
 			lex_indent_restore(lex_indent_state, save)
-		end
+			return nil
+		end)
 		local body = {n = 0;}
 		while true do
 			skip_ws()
