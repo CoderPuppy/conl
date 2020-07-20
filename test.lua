@@ -899,7 +899,6 @@ function const_fold(expr)
 			expr[Expr.Sconst] = {
 				type = 'module';
 				module = body.inner_scope.module;
-				extensions = {n = 0;};
 			}
 		else
 			error(('TODO: fn.type = %s'):format(fn.type))
@@ -1018,5 +1017,7 @@ end
 for i = 1, body.n do
 	type_infer(body[i])
 	const_fold(body[i])
+end
+for i = 1, body.n do
 	print(pl.pretty.write(body[i][Expr.Sconst]))
 end
