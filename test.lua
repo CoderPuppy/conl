@@ -693,7 +693,11 @@ local function pass_1(expr, scope, scope_i)
 	expr[Expr.Sscope] = scope
 	expr[Expr.Sscope_i] = scope_i
 	if expr.type == 'decl' then
-		local n = 1 + pass_1(expr.value, scope, scope_i + 1)
+		local n = 0
+		if expr.module then
+			n = n + 1 + pass_1(expr.module, scope, scope_i + n + 1)
+		end
+		n = n + 1 + pass_1(expr.value, scope, scope_i + n + 1)
 		if expr.export then
 			scope.module.bindings_expr.n = scope.module.bindings_expr.n + 1
 			scope.module.bindings_expr[scope.module.bindings_expr.n] = expr
