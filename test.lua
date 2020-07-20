@@ -319,19 +319,20 @@ local function skip_ws()
 	end
 end
 local precedence = {
-	decl = {
-		dot = true;
-	};
+	decl = {};
 	assign = {
 		plus = true;
+		concat = true;
 		assign = true;
 	};
 	block = {
 		plus = true;
+		concat = true;
 		assign = true;
 	};
-	plus = {
-		dot = true;
+	plus = {};
+	concat = {
+		plus = true;
 	};
 }
 do
@@ -572,8 +573,20 @@ local function parse_postop(prec)
 			return nil
 		end
 	elseif token.type == 'dot' then
-		if not precedence[prec].dot then return nil end
 		lex_indent_pull(lex_indent_state)
+		token = lex_indent_peek(lex_indent_state)
+		if token and token.type == 'dot' then
+			if not precedence[prec].concat then return nil end
+			lex_indent_pull(lex_indent_state)
+			skip_ws()
+			local right = assert(parse_expr 'concat')
+			return function(head) return {
+				type = 'binop';
+				op = '..';
+				left = head;
+				right = right;
+			} end
+		end
 		local name
 		while true do
 			local token = lex_indent_pull(lex_indent_state)
