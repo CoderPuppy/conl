@@ -1,2 +1,4 @@
-export def test.foo = { (bar) in "fiz" --[[foo]] + bar + "buz" }
-foo('bar')
+def foo = module({
+	export def bar = 1
+})
+foo.bar
