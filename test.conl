@@ -1,4 +1,6 @@
-def foo = module({
-	export def bar = 1
+def fiz = module({
+	export def buz = module({
+	})
+	export def buz.baz = 1
 })
-foo.bar
+fiz.buz.baz

@@ -773,7 +773,7 @@ function resolve(expr)
 			end
 			scope, scope_i = scope.parent, scope.parent_i
 		end
-		error(('TODO: expr name: %q'):format(expr.name))
+		error(('TODO: var name: %q'):format(expr.name))
 	elseif expr.type == 'access' then
 		type_infer(expr.head)
 		local head_t = expr.head[Expr.Stype]
@@ -822,7 +822,15 @@ function resolve(expr)
 				end
 				scope, scope_i = scope.parent, scope.parent_i
 			end
-			-- TODO: extensions
+			local ext = module.extension
+			while ext do
+				for i = 1, ext.module.bindings_expr.n do
+					if check(ext.module.bindings_expr[i]) then
+						return
+					end
+				end
+				ext = ext.prev
+			end
 			for i = 1, module.module.bindings_expr.n do
 				if check(module.module.bindings_expr[i], module) then
 					return
@@ -894,7 +902,19 @@ function const_fold(expr)
 			assert(expr.decl)
 			-- TODO: mutability
 			const_fold(expr.decl)
-			expr[Expr.Sconst] = expr.decl[Expr.Sconst]
+			local v = expr.decl[Expr.Sconst]
+			if v and v.type == 'module' then
+				local ext_v = {}
+				for k, v in pairs(v) do
+					ext_v[k] = v
+				end
+				ext_v.extension = {
+					module = expr.decl[Expr.Sscope].module;
+					prev = v.extension;
+				}
+				v = ext_v
+			end
+			expr[Expr.Sconst] = v
 		else
 			error(('TODO: head_t.type = %s'):format(head_t.type))
 		end
@@ -991,4 +1011,5 @@ end
 for i = 1, body.n do
 	type_infer(body[i])
 	const_fold(body[i])
+	print(pl.pretty.write(body[i][Expr.Sconst]))
 end
