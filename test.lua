@@ -650,3 +650,341 @@ while true do
 end
 assert(lex_indent_peek(lex_indent_state) == nil)
 print(pl.pretty.write(body))
+
+local Expr = {
+	Sscope = {};
+	Sscope_i = {};
+	Sconst = {};
+	Stype = {};
+}
+local str_type = {
+	type = 'str_t';
+}
+local number_type = {
+	type = 'number_t';
+}
+local module_type = {
+	type = 'module_t';
+}
+local function make_scope(parent, parent_i)
+	local scope = {
+		bindings_expr = { n = 0; };
+		children = {};
+		module = {
+			bindings_expr = { n = 0; };
+		};
+		parent = parent;
+		parent_i = parent_i;
+	}
+	if parent then
+		parent.children[parent_i] = scope
+	end
+	do
+		local linear = {
+			start_at = 0;
+			bindings_expr = { n = 0; };
+		}
+		scope.linear_first = linear
+		scope.linear_last = linear
+	end
+	return scope
+end
+local function pass_1(expr, scope, scope_i)
+	expr[Expr.Sscope] = scope
+	expr[Expr.Sscope_i] = scope_i
+	if expr.type == 'decl' then
+		local n = 1 + pass_1(expr.value, scope, scope_i + 1)
+		if expr.export then
+			scope.module.bindings_expr.n = scope.module.bindings_expr.n + 1
+			scope.module.bindings_expr[scope.module.bindings_expr.n] = expr
+		end
+		if expr.const then
+			scope.bindings_expr.n = scope.bindings_expr.n + 1
+			scope.bindings_expr[scope.bindings_expr.n] = expr
+		else
+			local new_linear = {
+				start_at = scope_i + n + 1;
+				prev = scope.linear_last;
+				bindings_expr = { n = 1; expr };
+			}
+			scope.linear_last.next = new_linear
+			scope.linear_last.end_before = scope_i + n + 1
+			scope.linear_last = new_linear
+		end
+		return n
+	elseif expr.type == 'fn' then
+		local i = 0
+		local new_scope = make_scope(scope, scope_i)
+		expr.inner_scope = new_scope
+		for i = 1, expr.body.n do
+			i = i + 1 + pass_1(expr.body[i], new_scope, i)
+		end
+		return 0
+	elseif expr.type == 'binop' then
+		local n = 0
+		n = n + 1 + pass_1(expr.left, scope, scope_i + n + 1)
+		n = n + 1 + pass_1(expr.right, scope, scope_i + n + 1)
+		return n
+	elseif expr.type == 'str' or expr.type == 'var' or expr.type == 'number' then
+		return 0
+	elseif expr.type == 'call' then
+		local n = 0
+		n = n + 1 + pass_1(expr.fn, scope, scope_i + n + 1)
+		for i = 1, expr.args.n do
+			n = n + 1 + pass_1(expr.args[i], scope, scope_i + n + 1)
+		end
+		return n
+	elseif expr.type == 'access' then
+		return 1 + pass_1(expr.head, scope, scope_i + 1)
+	else
+		error(('TODO: expr.type = %s'):format(expr.type))
+	end
+end
+local resolve, const_fold, type_infer
+function resolve(expr)
+	if expr.type == 'var' then
+		if expr.decl then return end
+		local scope, scope_i = expr[Expr.Sscope], expr[Expr.Sscope_i]
+		while scope do
+			local linear = scope.linear_last
+			while linear.start_at > scope_i do
+				linear = linear.prev
+			end
+			while linear do
+				for i = 1, linear.bindings_expr.n do
+					local decl = linear.bindings_expr[i]
+					if not decl.module and decl.name == expr.name then
+						expr.decl = decl
+						return
+					end
+				end
+				linear = linear.prev
+			end
+			for i = 1, scope.bindings_expr.n do
+				local decl = scope.bindings_expr[i]
+				if not decl.module and decl.name == expr.name then
+					expr.decl = decl
+					return
+				end
+			end
+			scope, scope_i = scope.parent, scope.parent_i
+		end
+		error(('TODO: expr name: %q'):format(expr.name))
+	elseif expr.type == 'access' then
+		type_infer(expr.head)
+		local head_t = expr.head[Expr.Stype]
+		if head_t.type == 'module_t' then
+			if expr.dynamic then return end
+			const_fold(expr.head)
+			local module = expr.head[Expr.Sconst]
+			assert(module)
+			assert(module.type == 'module')
+			local dynamic = {n = 0;}
+			expr.dynamic = dynamic
+			local function check(decl, m)
+				if not decl.module and not module then return false end
+				if decl.name ~= expr.name then return false end
+				if decl.module then
+					const_fold(decl.module)
+					m = decl.module[Expr.Sconst]
+					if not m then
+						dynamic.n = dynamic.n + 1
+						dynamic[dynamic.n] = decl
+						return false
+					end
+				end
+				if m.module ~= module.module then return false end
+				expr.decl = decl
+				return true
+			end
+			local scope, scope_i = expr[Expr.Sscope], expr[Expr.Sscope_i]
+			while scope do
+				local linear = scope.linear_last
+				while linear.start_at > scope_i do
+					linear = linear.prev
+				end
+				while linear do
+					for i = 1, linear.bindings_expr.n do
+						if check(linear.bindings_expr[i]) then
+							return
+						end
+					end
+					linear = linear.prev
+				end
+				for i = 1, scope.bindings_expr.n do
+					if check(scope.bindings_expr[i]) then
+						return
+					end
+				end
+				scope, scope_i = scope.parent, scope.parent_i
+			end
+			-- TODO: extensions
+			for i = 1, module.module.bindings_expr.n do
+				if check(module.module.bindings_expr[i], module) then
+					return
+				end
+			end
+			if dynamic.n == 0 then
+				error(('TODO: expr: module = %s, name = %q'):format(module.module, expr.name))
+			end
+		else
+			error(('TODO: head_t.type = %s'):format(head_t.type))
+		end
+	elseif expr.type == 'decl' or expr.type == 'call' or expr.type == 'fn' or expr.type == 'number' then
+	else
+		error(('TODO: expr.type = %s'):format(expr.type))
+	end
+end
+function const_fold(expr)
+	if expr[Expr.Sconst] then return end
+	resolve(expr)
+	if expr.type == 'decl' then
+		const_fold(expr.value)
+		expr[Expr.Sconst] = expr.value[Expr.Sconst]
+	elseif expr.type == 'fn' then
+		expr[Expr.Sconst] = {
+			type = 'fn';
+			inner_scope = expr.inner_scope;
+		}
+	elseif expr.type == 'binop' then
+		const_fold(expr.left)
+		const_fold(expr.right)
+		local l, r = expr.left[Expr.Sconst], expr.right[Expr.Sconst]
+		if l and r then
+			error(('TODO: op = %s'):format(expr.op))
+		end
+	elseif expr.type == 'str' then
+		expr[Expr.Sconst] = {
+			type = 'str';
+			text = expr.text;
+		}
+	elseif expr.type == 'number' then
+		expr[Expr.Sconst] = {
+			type = 'number';
+			value = expr.value;
+		}
+	elseif expr.type == 'var' then
+		-- TODO: mutability
+		const_fold(expr.decl.value)
+		expr[Expr.Sconst] = expr.decl.value[Expr.Sconst]
+	elseif expr.type == 'call' then
+		const_fold(expr.fn)
+		local fn = expr.fn[Expr.Sconst]
+		if not fn then return end
+		if fn.type == 'builtin:module' then
+			assert(expr.args.n == 1)
+			const_fold(expr.args[1])
+			local body = expr.args[1][Expr.Sconst]
+			if body.type ~= 'fn' then return end
+			expr[Expr.Sconst] = {
+				type = 'module';
+				module = body.inner_scope.module;
+				extensions = {n = 0;};
+			}
+		else
+			error(('TODO: fn.type = %s'):format(fn.type))
+		end
+	elseif expr.type == 'access' then
+		local head_t = expr.head[Expr.Stype]
+		if head_t.type == 'module_t' then
+			assert(expr.decl)
+			-- TODO: mutability
+			const_fold(expr.decl)
+			expr[Expr.Sconst] = expr.decl[Expr.Sconst]
+		else
+			error(('TODO: head_t.type = %s'):format(head_t.type))
+		end
+	else
+		error(('TODO: expr.type = %s'):format(expr.type))
+	end
+end
+function type_infer(expr)
+	if expr[Expr.Stype] then return end
+	resolve(expr)
+	if expr.type == 'decl' then
+		type_infer(expr.value)
+		expr[Expr.Stype] = expr.value[Expr.Stype]
+	elseif expr.type == 'fn' then
+		for i = 1, expr.body.n do
+			type_infer(expr.body[i])
+		end
+		expr[Expr.Stype] = {
+			type = 'fn_t';
+		}
+	elseif expr.type == 'binop' then
+		type_infer(expr.left)
+		type_infer(expr.right)
+		local l, r = expr.left[Expr.Stype], expr.right[Expr.Stype]
+		error(('TODO: op = %s'):format(expr.op))
+	elseif expr.type == 'str' then
+		expr[Expr.Stype] = str_type
+	elseif expr.type == 'number' then
+		expr[Expr.Stype] = number_type
+	elseif expr.type == 'var' then
+		-- TODO: mutability
+		type_infer(expr.decl)
+		expr[Expr.Stype] = expr.decl[Expr.Stype]
+	elseif expr.type == 'call' then
+		type_infer(expr.fn)
+		for i = 1, expr.args.n do
+			type_infer(expr.args[i])
+		end
+		local fn_t = expr.fn[Expr.Stype]
+		if fn_t.type == 'fn_t' then
+			-- TODO: polymorphism
+			expr[Expr.Stype] = fn_t.ret
+		else
+			error(('TODO: fn_t.type = %s'):format(fn_t.type))
+		end
+	elseif expr.type == 'access' then
+		local head_t = expr.head[Expr.Stype]
+		if head_t.type == 'module_t' then
+			assert(expr.decl)
+			type_infer(expr.decl)
+			expr[Expr.Stype] = expr.decl[Expr.Stype]
+		else
+			error(('TODO: head_t.type = %s'):format(head_t.type))
+		end
+	else
+		error(('TODO: expr.type = %s'):format(expr.type))
+	end
+end
+local global = make_scope()
+do
+	global.bindings_expr.n = global.bindings_expr.n + 1
+	global.bindings_expr[global.bindings_expr.n] = {
+		type = 'decl';
+		export = false;
+		const = true;
+		module = nil;
+		name = 'module';
+		value = {
+			type = 'const';
+			[Expr.Stype] = {
+				type = 'fn_t';
+				ret = {
+					type = 'module_t';
+				};
+			};
+			[Expr.Sconst] = {
+				type = 'builtin:module';
+			};
+			-- [Expr.Sscope] = global;
+			-- [Expr.Sscope_i] = 0;
+		};
+		-- [Expr.Sscope] = global;
+		-- [Expr.Sscope_i] = 0;
+	}
+end
+local scope = make_scope(global, 0)
+do -- pass 1
+	local i = 0
+	for j = 1, body.n do
+		i = i + pass_1(body[j], scope, i) + 1
+	end
+	print(i)
+end
+for i = 1, body.n do
+	type_infer(body[i])
+	const_fold(body[i])
+end
