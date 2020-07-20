@@ -352,16 +352,16 @@ local function parse_decl()
 	skip_ws()
 	local const = token.text == 'def'
 	local save = lex_indent_save(lex_indent_state)
-	local ok, mod, name = xpcall(function()
+	local ok, name, mod = xpcall(function()
 		local mod = parse_expr 'decl'
 		assert(mod.type == 'access')
-		return mod.head, mod.name
+		return mod.name, mod.head
 	end, function(err)
 		print(err, debug.traceback())
 		lex_indent_restore(lex_indent_state, save)
 		token = lex_indent_pull(lex_indent_state)
 		assert(token.type == 'identifier')
-		return nil, token.text
+		return token.text, nil
 	end)
 	skip_ws()
 	token = lex_indent_pull(lex_indent_state)
@@ -372,9 +372,9 @@ local function parse_decl()
 		type = 'decl';
 		export = false;
 		const = const;
-		mod = mod;
+		module = mod;
 		name = name;
-		val = val;
+		value = val;
 	}
 end
 local function parse_block(end_token_type)
