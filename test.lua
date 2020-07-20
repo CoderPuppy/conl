@@ -441,6 +441,20 @@ local function parse_expr_atom()
 			end
 
 			error('TODO')
+		elseif token.text:match '^%d+$' then
+			local text = token.text
+			local token = lex_indent_peek(lex_indent_state)
+			if token.type == 'dot' then
+				lex_indent_pull(lex_indent_state)
+				token = lex_indent_pull(lex_indent_state)
+				assert(token.type == 'identifier')
+				assert(token.text:match '^%d+$')
+				text = text .. '.' .. token.text
+			end
+			return {
+				type = 'number';
+				value = tonumber(text);
+			}
 		else
 			return {
 				type = 'var';
