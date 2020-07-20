@@ -351,6 +351,13 @@ local function parse_decl()
 	lex_indent_pull(lex_indent_state)
 	skip_ws()
 	local const = token.text == 'def'
+	local mutable = false
+	token = lex_indent_peek(lex_indent_state)
+	if token and token.type == 'identifier' and token.text == 'mut' then
+		lex_indent_pull(lex_indent_state)
+		skip_ws()
+		mutable = true
+	end
 	local save = lex_indent_save(lex_indent_state)
 	local ok, name, mod = xpcall(function()
 		local mod = parse_expr 'decl'
@@ -372,6 +379,7 @@ local function parse_decl()
 		type = 'decl';
 		export = false;
 		const = const;
+		mutable = mutable;
 		module = mod;
 		name = name;
 		value = val;
@@ -876,7 +884,7 @@ function const_fold(expr)
 			value = expr.value;
 		}
 	elseif expr.type == 'var' then
-		-- TODO: mutability
+		if expr.decl.mutable then return end
 		const_fold(expr.decl.value)
 		expr[Expr.Sconst] = expr.decl.value[Expr.Sconst]
 	elseif expr.type == 'call' then
@@ -900,7 +908,7 @@ function const_fold(expr)
 		local head_t = expr.head[Expr.Stype]
 		if head_t.type == 'module_t' then
 			assert(expr.decl)
-			-- TODO: mutability
+			if expr.decl.mutable then return end
 			const_fold(expr.decl)
 			local v = expr.decl[Expr.Sconst]
 			if v and v.type == 'module' then
@@ -945,7 +953,6 @@ function type_infer(expr)
 	elseif expr.type == 'number' then
 		expr[Expr.Stype] = number_type
 	elseif expr.type == 'var' then
-		-- TODO: mutability
 		type_infer(expr.decl)
 		expr[Expr.Stype] = expr.decl[Expr.Stype]
 	elseif expr.type == 'call' then
