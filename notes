@@ -1,0 +1,20 @@
+modules
+	each conl "object" has a module
+	dynamic form of lexical scoping
+	a module has an identity and a set of bindings (each one with a module, a name and a value)
+	declarations
+		def <mod>.<name> = <val>
+		also def mut, let and let mut
+		adds a binding to the current scope
+		if prefixed with export then add it to the current module as well
+	lookup
+		<mod>.<name>
+		search up the scope stack for a matching binding
+		if none is found then look in <mod>
+	TODO: automatically seeing bindings from containing module after pulling the inner module out
+		def fiz = module({
+			export def buz = module({})
+			export def buz.baz = 1
+		})
+		fiz.buz.baz == 1
+	TODO: reexport
