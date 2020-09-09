@@ -322,17 +322,21 @@ local precedence = {
 	decl = {};
 	assign = {
 		plus = true;
+		minus = true;
 		concat = true;
 		assign = true;
 	};
 	block = {
 		plus = true;
+		minus = true;
 		concat = true;
 		assign = true;
 	};
 	plus = {};
+	minus = {};
 	concat = {
 		plus = true;
+		minus = true;
 	};
 }
 do
@@ -581,6 +585,17 @@ local function parse_postop(prec)
 				left = head;
 				right = right;
 			} end
+		elseif token.text == '-' then
+			if not precedence[prec].minus then return nil end
+			lex_indent_pull(lex_indent_state)
+			skip_ws()
+			local right = assert(parse_expr 'minus')
+			return function(head) return {
+				type = 'binop';
+				op = '-';
+				left = head;
+				right = right;
+			} end
 		elseif token.text == '=' then
 			if not precedence[prec].assign then return nil end
 			lex_indent_pull(lex_indent_state)
@@ -648,7 +663,7 @@ function parse_expr(prec)
 end
 local body = {n = 0;}
 while true do
-	local expr = parse_expr 'global'
+	local expr = parse_expr 'block'
 	if expr then
 		body.n = body.n + 1
 		body[body.n] = expr
@@ -658,6 +673,7 @@ while true do
 end
 assert(lex_indent_peek(lex_indent_state) == nil)
 print(pl.pretty.write(body))
+if true then return end
 
 local Expr = {
 	Sscope = {};

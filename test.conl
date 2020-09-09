@@ -1,7 +1,2 @@
-def fiz = module({
-	export def buz = module({
-	})
-	export def buz.baz = 1
-})
-fiz.buz
-fiz.buz.baz
+foo
+- baz
