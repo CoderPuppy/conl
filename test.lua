@@ -229,7 +229,7 @@ local function lex_indent_peek(state)
 				lex_pull(state.lex)
 				token = lex_peek(state.lex)
 			end
-			state.indent = {indent}
+			state.indent = indent
 		end
 		return token
 	end
@@ -240,35 +240,40 @@ local function lex_indent_pull(state)
 		state.pending = nil
 	else
 		lex_pull(state.lex)
-		if token and token.type == 'newline' then
-			local new_indent = ''
-			local eof = not lex_peek(state.lex)
-			local next_token
+		local next_token = lex_peek(state.lex)
+		if next_token and next_token.type == 'newline' then
+			local tokens = {n = 0}
+			local new_token = {
+				type = 'indent_newline';
+				text = '';
+				start_pos = next_token.start_pos;
+				tokens = tokens;
+				old_indent = state.indent;
+			}
+			local skip_ws
 			while true do
-				next_token = lex_peek(state.lex)
-				if not next_token or next_token.type ~= 'linear_ws' then
+				local next_token = lex_peek(state.lex)
+				if not next_token then
+					break
+				elseif next_token.type == 'newline' then
+					new_token.new_indent = ''
+					skip_ws = false
+				elseif next_token.type == 'linear_ws' then
+					if not skip_ws then
+						new_token.new_indent = new_token.new_indent .. next_token.text
+					end
+				elseif next_token.type == 'line_comment' then
+				elseif next_token.type == 'block_comment' then
+					skip_ws = true
+				else
 					break
 				end
+				new_token.text = new_token.text .. next_token.text
 				lex_pull(state.lex)
-				new_indent = new_indent .. next_token.text
+				tokens.n = tokens.n + 1
+				tokens[tokens.n] = next_token
 			end
-			if next_token and next_token.type ~= 'newline' then
-				local cur_indent = state.indent[#state.indent]
-				if new_indent == cur_indent then
-				elseif new_indent:sub(1, #cur_indent) == cur_indent then
-					state.indent[#state.indent + 1] = new_indent
-					state.pending = { type = 'indent'; relative = new_indent:sub(#cur_indent + 1); }
-				elseif cur_indent:sub(1, #new_indent) == new_indent then
-					if #state.indent == 1 and not eof then
-						-- the `not eof` is to accept a trailing newline (unix style), which would not have any indentation after it
-						error(('dedent below initial level: old = %q, new = %q'):format(cur_indent, new_indent))
-					end
-					state.indent[#state.indent] = nil
-					state.pending = { type = 'dedent'; relative = cur_indent:sub(#new_indent + 1); }
-				else
-					error(('bad indentation: old = %q, new = %q'):format(cur_indent, new_indent))
-				end
-			end
+			state.pending = new_token
 		end
 	end
 	return token
@@ -302,11 +307,7 @@ local function is_ws(token)
 	end
 	return false
 		or token.type == 'linear_ws'
-		or token.type == 'newline'
-		or token.type == 'line_comment'
-		or token.type == 'block_comment'
-		or token.type == 'indent'
-		or token.type == 'dedent'
+		or token.type == 'indent_newline'
 end
 local function skip_ws()
 	while true do
