@@ -769,35 +769,54 @@ local function pass_1(expr, scope, scope_i)
 	end
 end
 local resolve, const_fold, type_infer
+local function search_scopes(expr, module, check)
+	local scope, scope_i = expr[Expr.Sscope], expr[Expr.Sscope_i]
+	while scope do
+		local linear = scope.linear_last
+		while linear.start_at > scope_i do
+			linear = linear.prev
+		end
+		while linear do
+			for i = 1, linear.bindings_expr.n do
+				if check(linear.bindings_expr[i]) then
+					return true
+				end
+			end
+			linear = linear.prev
+		end
+		for i = 1, scope.bindings_expr.n do
+			if check(scope.bindings_expr[i]) then
+				return true
+			end
+		end
+		scope, scope_i = scope.parent, scope.parent_i
+	end
+	if module then
+		local ext = module.extension
+		while ext do
+			for i = 1, ext.module.bindings_expr.n do
+				if check(ext.module.bindings_expr[i]) then
+					return true
+				end
+			end
+			ext = ext.prev
+		end
+		for i = 1, module.module.bindings_expr.n do
+			if check(module.module.bindings_expr[i], module) then
+				return true
+			end
+		end
+	end
+	return false
+end
 function resolve(expr)
 	if expr.type == 'var' then
 		if expr.decl then return end
-		local scope, scope_i = expr[Expr.Sscope], expr[Expr.Sscope_i]
-		while scope do
-			local linear = scope.linear_last
-			while linear.start_at > scope_i do
-				linear = linear.prev
-			end
-			while linear do
-				for i = 1, linear.bindings_expr.n do
-					local decl = linear.bindings_expr[i]
-					if not decl.module and decl.name == expr.name then
-						expr.decl = decl
-						return
-					end
-				end
-				linear = linear.prev
-			end
-			for i = 1, scope.bindings_expr.n do
-				local decl = scope.bindings_expr[i]
-				if not decl.module and decl.name == expr.name then
-					expr.decl = decl
-					return
-				end
-			end
-			scope, scope_i = scope.parent, scope.parent_i
+		if not search_scopes(expr, nil, function(decl)
+			return not decl.module and decl.name == expr.name
+		end) then
+			error(('TODO: var name: %q'):format(expr.name))
 		end
-		error(('TODO: var name: %q'):format(expr.name))
 	elseif expr.type == 'access' then
 		type_infer(expr.head)
 		local head_t = expr.head[Expr.Stype]
@@ -809,7 +828,7 @@ function resolve(expr)
 			assert(module.type == 'module')
 			local dynamic = {n = 0;}
 			expr.dynamic = dynamic
-			local function check(decl, m)
+			if not search_scopes(expr, module, function(decl, m)
 				if not decl.module and not module then return false end
 				if decl.name ~= expr.name then return false end
 				if decl.module then
@@ -824,44 +843,10 @@ function resolve(expr)
 				if m.module ~= module.module then return false end
 				expr.decl = decl
 				return true
-			end
-			local scope, scope_i = expr[Expr.Sscope], expr[Expr.Sscope_i]
-			while scope do
-				local linear = scope.linear_last
-				while linear.start_at > scope_i do
-					linear = linear.prev
+			end) then
+				if dynamic.n == 0 then
+					error(('TODO: expr: module = %s, name = %q'):format(module.module, expr.name))
 				end
-				while linear do
-					for i = 1, linear.bindings_expr.n do
-						if check(linear.bindings_expr[i]) then
-							return
-						end
-					end
-					linear = linear.prev
-				end
-				for i = 1, scope.bindings_expr.n do
-					if check(scope.bindings_expr[i]) then
-						return
-					end
-				end
-				scope, scope_i = scope.parent, scope.parent_i
-			end
-			local ext = module.extension
-			while ext do
-				for i = 1, ext.module.bindings_expr.n do
-					if check(ext.module.bindings_expr[i]) then
-						return
-					end
-				end
-				ext = ext.prev
-			end
-			for i = 1, module.module.bindings_expr.n do
-				if check(module.module.bindings_expr[i], module) then
-					return
-				end
-			end
-			if dynamic.n == 0 then
-				error(('TODO: expr: module = %s, name = %q'):format(module.module, expr.name))
 			end
 		else
 			error(('TODO: head_t.type = %s'):format(head_t.type))
