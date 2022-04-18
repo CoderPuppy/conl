@@ -184,23 +184,23 @@ local function lex_make_rules(rules)
 	return rules
 end
 local lex_rules = lex_make_rules {
-	{n=1, pat='\'', act=lex_token 'quote'};
-	{n=1, pat='"', act=lex_token 'quote'};
-	{n=1, pat='%(', act=lex_token 'open_paren'};
-	{n=1, pat='%)', act=lex_token 'close_paren'};
-	{n=1, pat='{', act=lex_token 'open_brace'};
-	{n=1, pat='}', act=lex_token 'close_brace'};
-	{n=1, pat='%[', act=lex_token 'open_bracket'};
-	{n=1, pat='%]', act=lex_token 'close_bracket'};
-	{n=1, pat='%.', act=lex_token 'dot'};
-	{n=1, pat=':', act=lex_token 'colon'};
-	{n=1, pat=',', act=lex_token 'comma'};
-	{n=1, pat=';', act=lex_token 'semicolon'};
-	{n=3, pat='%-%-%[', ext_pat='[^\r\n]+', act=lex_block 'block_comment'};
-	{n=2, pat='%-%-([^\r\n]*)', ext_pat='([^\r\n]+)', act=lex_token 'line_comment'};
-	{n=2, pat='\r?\n', act=lex_token 'newline'};
-	{n=1, pat='[^%S\n]+', ext_pat=true, act=lex_token 'linear_ws'};
-	{n=1, pat='[^()%[%]{}%s\'",;:%.]+', ext_pat=true, act=lex_token 'identifier'};
+	{n=1, pat='\'',                                   act=lex_token 'quote'        };
+	{n=1, pat='"',                                    act=lex_token 'quote'        };
+	{n=1, pat='%(',                                   act=lex_token 'open_paren'   };
+	{n=1, pat='%)',                                   act=lex_token 'close_paren'  };
+	{n=1, pat='{',                                    act=lex_token 'open_brace'   };
+	{n=1, pat='}',                                    act=lex_token 'close_brace'  };
+	{n=1, pat='%[',                                   act=lex_token 'open_bracket' };
+	{n=1, pat='%]',                                   act=lex_token 'close_bracket'};
+	{n=1, pat='%.',                                   act=lex_token 'dot'          };
+	{n=1, pat=':',                                    act=lex_token 'colon'        };
+	{n=1, pat=',',                                    act=lex_token 'comma'        };
+	{n=1, pat=';',                                    act=lex_token 'semicolon'    };
+	{n=3, pat='%-%-%[',         ext_pat='[^\r\n]+',   act=lex_block 'block_comment'};
+	{n=2, pat='%-%-([^\r\n]*)', ext_pat='([^\r\n]+)', act=lex_token 'line_comment' };
+	{n=2, pat='\r?\n',                                act=lex_token 'newline'      };
+	{n=1, pat='[^%S\n]+',               ext_pat=true, act=lex_token 'linear_ws'    };
+	{n=1, pat='[^()%[%]{}%s\'",;:%.]+', ext_pat=true, act=lex_token 'identifier'   };
 }
 local lex_rules_string = lex_make_rules {
 	{n=1, pat='\'', act=lex_token 'quote'};
